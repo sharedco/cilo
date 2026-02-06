@@ -1,8 +1,8 @@
 # Cilo
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/cilo/cilo)](https://goreportcard.com/report/github.com/cilo/cilo)
+[![Go Report Card](https://goreportcard.com/badge/github.com/sharedco/cilo)](https://goreportcard.com/report/github.com/sharedco/cilo)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/cilo/cilo/releases)
+[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/sharedco/cilo/releases)
 
 **Cilo creates isolated, high-fidelity environments from Docker Compose projects.**
 

@@ -14,7 +14,7 @@ Thank you for your interest in contributing to Cilo! We welcome contributions fr
 ### Building from Source
 
 ```bash
-git clone https://github.com/cilo/cilo.git
+git clone https://github.com/sharedco/cilo.git
 cd cilo/cilo
 go build -o cilo main.go
 ```
@@ -61,5 +61,5 @@ go test ./tests/e2e/...
 
 ## Community
 
-- Join our discussions on [GitHub Discussions](https://github.com/cilo/cilo/discussions).
+- Join our discussions on [GitHub Discussions](https://github.com/sharedco/cilo/discussions).
 - Adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
