@@ -1,0 +1,114 @@
+# GoReleaser configuration for Cilo
+# Documentation: https://goreleaser.com
+
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: cilo
+    main: ./cilo/main.go
+    binary: cilo
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/cilo/cilo/cmd.version={{.Version}}
+      - -X github.com/cilo/cilo/cmd.commit={{.Commit}}
+      - -X github.com/cilo/cilo/cmd.date={{.Date}}
+
+archives:
+  - id: cilo
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+    format: tar.gz
+    files:
+      - LICENSE
+      - README.md
+      - docs/*
+      - examples/*
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - Merge pull request
+      - Merge branch
+
+# Homebrew tap
+brews:
+  - name: cilo
+    repository:
+      owner: sharedco
+      name: homebrew-tap
+    directory: Formula
+    homepage: "https://github.com/sharedco/cilo"
+    description: "Run unlimited isolated agents on the same Docker Compose project"
+    license: "MIT"
+    test: |
+      system "#{bin}/cilo --version"
+    install: |
+      bin.install "cilo"
+
+# GitHub Releases
+release:
+  github:
+    owner: sharedco
+    name: cilo
+  draft: true
+  prerelease: auto
+  name_template: "{{.ProjectName}}-v{{.Version}}"
+  header: |
+    ## Installation
+
+    ### macOS/Linux
+    ```bash
+    # Download and install
+    curl -sL https://github.com/sharedco/cilo/releases/download/v{{.Version}}/cilo_{{.Version}}_$(uname -s)_$(uname -m).tar.gz | tar xz
+    sudo mv cilo /usr/local/bin/
+    sudo cilo init
+    ```
+
+    ### Homebrew
+    ```bash
+    brew install sharedco/tap/cilo
+    sudo cilo init
+    ```
+
+    ## Quick Start
+    ```bash
+    cilo run opencode my-agent "your task here"
+    ```
+
+  footer: |
+    **Full Changelog**: https://github.com/sharedco/cilo/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+# Docker images (optional, for future)
+# dockers:
+#   - image_templates:
+#       - "ghcr.io/sharedco/cilo:{{ .Tag }}"
+#       - "ghcr.io/sharedco/cilo:v{{ .Major }}"
+#       - "ghcr.io/sharedco/cilo:v{{ .Major }}.{{ .Minor }}"
+#       - "ghcr.io/sharedco/cilo:latest"

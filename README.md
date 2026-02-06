@@ -184,11 +184,12 @@ REDIS_URL="http://redis.${CILO_ENV}${CILO_DNS_SUFFIX}"  # redis.agent-1.test
 ## Quick Start
 
 ```bash
-# 1. Install
-export PATH="$PATH:/var/deployment/sharedco/cilo/bin"
-(cd /var/deployment/sharedco/cilo/cilo && go build -o cilo main.go)
+# 1. Install (build from source for now—releases coming soon)
+git clone https://github.com/sharedco/cilo.git
+cd cilo/cilo && go build -o cilo main.go
+export PATH="$PATH:$(pwd)"
 
-# 2. Initialize (one-time, requires sudo for DNS)
+# 2. Initialize (one-time, requires sudo for DNS setup)
 sudo cilo init
 
 # 3. Run your first isolated agent
@@ -197,6 +198,162 @@ cilo run opencode demo "fix the login bug"
 # 4. Access the environment
 curl http://api.demo.test  # service.env.test format
 ```
+
+---
+
+## Installation
+
+**Current (v0.2.1): Build from source**
+```bash
+git clone https://github.com/sharedco/cilo.git
+cd cilo/cilo
+go build -o cilo main.go
+mv cilo /usr/local/bin/  # or anywhere in your PATH
+```
+
+**Coming soon:**
+- Homebrew: `brew install sharedco/tap/cilo`
+- Releases: Pre-built binaries on GitHub Releases
+
+---
+
+## Managing Environments
+
+Each `cilo run` creates an isolated environment. Here's how to manage them:
+
+```bash
+# See all your environments
+cilo list                    # Current project
+cilo list --all              # All projects
+
+# Stop an environment (keeps workspace)
+cilo down agent-1
+
+# Destroy an environment (removes workspace & containers)
+cilo destroy agent-1
+cilo destroy agent-1 --force # Skip confirmation
+
+# Clean up everything
+cilo destroy --all --force
+
+# Check health and find orphaned resources
+cilo doctor                  # Diagnose issues
+cilo doctor --fix            # Auto-repair
+```
+
+**Environment Lifecycle:**
+- **Created:** `cilo run` or `cilo create` makes a workspace copy
+- **Running:** Containers are active, DNS entries exist
+- **Stopped:** `cilo down` stops containers but keeps workspace
+- **Destroyed:** `cilo destroy` removes everything (containers, workspace, DNS)
+
+---
+
+## DNS Setup (What sudo Changes)
+
+`sudo cilo init` configures local DNS resolution for `.test` domains. Here's exactly what changes:
+
+**macOS:**
+- Creates `/etc/resolver/test` → points to `127.0.0.1:5354`
+
+**Linux (systemd-resolved):**
+- Creates `/etc/systemd/resolved.conf.d/cilo.conf`
+- Adds DNS stub listener on `127.0.0.1:5354`
+
+**To remove:**
+```bash
+# macOS
+sudo rm /etc/resolver/test
+
+# Linux
+sudo rm /etc/systemd/resolved.conf.d/cilo.conf
+sudo systemctl restart systemd-resolved
+```
+
+See [Operations Guide](docs/OPERATIONS.md#manual-uninstallation) for full details.
+
+---
+
+## Resource Considerations
+
+Cilo environments share your machine's resources. Plan accordingly:
+
+**Container Count:**
+```
+10 environments × 5 services each = 50 containers
+```
+
+**Resource Estimates:**
+| Environment Type | RAM | CPU | Disk |
+|-----------------|-----|-----|------|
+| Simple (1-2 containers) | 256MB | 0.25 cores | ~50MB |
+| Typical (3-5 containers) | 512MB-1GB | 0.5 cores | ~100MB |
+| Heavy (DB + cache + apps) | 2-4GB | 1-2 cores | ~500MB |
+
+**Recommendations:**
+- Start with 3-5 environments
+- Monitor with `docker stats` and `cilo list`
+- Use `cilo destroy` aggressively—environments are cheap to recreate
+- Consider Docker resource limits in your compose files
+
+See [Resource Scaling Guide](docs/RESOURCE_SCALING.md) for detailed guidance.
+
+---
+
+## Disk Efficiency (Copy-on-Write)
+
+**Cilo uses copy-on-write (CoW) for efficient storage.** When creating environment copies:
+
+- **Linux (btrfs/XFS):** Uses `FICLONE` ioctl—near-zero extra disk space
+- **macOS (APFS):** Uses file cloning—near-zero extra disk space
+- **Fallback:** Standard copy if CoW unavailable
+
+**What this means:**
+```bash
+# Your source code: 500MB
+# 10 environments with CoW: ~500MB total (not 5GB!)
+# 10 environments without CoW: ~5GB
+
+# Check actual disk usage
+du -sh ~/.cilo/envs/myapp/*  # Shows apparent size
+du -sh --apparent-size ~/.cilo/envs/myapp/*  # Shows logical size
+```
+
+**Requirements:**
+- Modern filesystem (APFS, btrfs, XFS with reflink)
+- Same filesystem as source code
+
+---
+
+## Agent Integration
+
+Cilo provides environment variables for agents to discover services automatically:
+
+```bash
+# In your agent or application
+export API_URL="http://api.${CILO_ENV}${CILO_DNS_SUFFIX}"
+export DB_URL="http://db.${CILO_ENV}${CILO_DNS_SUFFIX}"
+```
+
+**Example: Node.js agent reading CILO_BASE_URL**
+```javascript
+// config.js
+const baseUrl = process.env.CILO_BASE_URL || 'http://localhost:3000';
+module.exports = { baseUrl };
+```
+
+**Example: Python agent discovering services**
+```python
+import os
+
+env = os.environ['CILO_ENV']
+dns_suffix = os.environ['CILO_DNS_SUFFIX']
+
+api_url = f"http://api.{env}{dns_suffix}"
+db_url = f"http://db.{env}{dns_suffix}"
+```
+
+See [Agent Integration Guide](docs/AGENT_INTEGRATION.md) for complete patterns.
 
 ---
 
@@ -217,6 +374,9 @@ curl http://api.demo.test  # service.env.test format
 - **[Examples](examples/)** — Real-world agent patterns and workflows
 - **[Core Architecture](docs/ARCHITECTURE.md)** — How isolation works
 - **[Operations & Setup](docs/OPERATIONS.md)** — Troubleshooting and maintenance
+- **[Resource Scaling](docs/RESOURCE_SCALING.md)** — Resource planning and limits
+- **[Agent Integration](docs/AGENT_INTEGRATION.md)** — Integrating agents with Cilo
+- **[Concerns Assessment](docs/CONCERNS_ASSESSMENT.md)** — Objective review of project concerns
 - **[Future: Remote & Mesh](docs/REMOTE_NETWORKING.md)** — Multi-host agent distribution
 
 ---
