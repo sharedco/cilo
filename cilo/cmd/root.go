@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	version = "0.1.20"
+	version = "0.2.1"
 	commit  = "unknown"
 	date    = "unknown"
 )
@@ -48,6 +48,8 @@ func init() {
 	rootCmd.AddCommand(composeCmd)
 	rootCmd.AddCommand(dnsCmd)
 	rootCmd.AddCommand(hostnamesCmd)
+	rootCmd.AddCommand(diffCmd)
+	rootCmd.AddCommand(mergeCmd)
 }
 
 var initCmd = &cobra.Command{

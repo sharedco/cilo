@@ -1,6 +1,6 @@
 # Cilo Architecture Epic (Refined)
 
-**Status:** Phase A (Foundations) ✅ Complete (v0.1.20)  
+**Status:** Phase A (Foundations) ✅ Complete (v0.2.0)  
 **Next:** Phase 2A (Shared Resources) or Phase 2B (Remote Operation) when ready  
 **Primary goal (achieved):** Local Cilo is now reliable and non-fragile under real usage.
 
@@ -31,7 +31,7 @@ These are non-negotiable. Design and implementation work must preserve them.
 
 ## 2) Resolved Risks (Phase A Complete)
 
-✅ **Fixed in v0.1.20:**
+✅ **Fixed in v0.2.0:**
 
 1. ~~Global mutable state with no locking / non-atomic writes~~ → **Fixed:** File locking via `gofrs/flock` + atomic writes
 2. ~~DNS config maintained by in-place text editing~~ → **Fixed:** Full render model from state
@@ -74,7 +74,7 @@ See: [Phase 0: Runtime Abstraction](./phases/PHASE_0_RUNTIME_ABSTRACTION.md)
 
 ### Phase A: Foundations Hardening ✅ COMPLETE
 
-**Status:** Done (v0.1.20)  
+**Status:** Done (v0.2.0)  
 **Goal:** Make local Cilo correct, stable, and maintainable. ✅ ACHIEVED
 
 **Deliverables (must align with invariants):**

@@ -1,7 +1,7 @@
 # Cilo Development Roadmap
 
 **Version:** 2.0  
-**Status:** Phase 1 Complete ✅ (v0.1.20)
+**Status:** Phase 1 Complete ✅ (v0.2.0)
 
 ---
 
@@ -29,7 +29,7 @@ Make Cilo reliable locally, while keeping the long-term direction visible.
 | Phase | Duration | Status | Notes |
 |-------|----------|--------|-------|
 | **Phase 0: Runtime Abstraction** | 0.5 day | ✅ Complete | Provider interface for Docker operations |
-| **Phase 1: Foundations** | 2-3 days | ✅ Complete | v0.1.20 - File locking, atomic writes, DNS render, collision detection |
+| **Phase 1: Foundations** | 2-3 days | ✅ Complete | v0.2.0 - File locking, atomic writes, DNS render, collision detection |
 | **Phase 1B: cilo run** | 0.5 day | ✅ Complete | Agent-first workflow command |
 | **Phase 2A: Shared Resources** | 1–3 days | 📝 Optional | Only if demanded |
 | **Phase 2B: Remote Operation** | TBD | 📝 Draft | Requires routing-model decision gate |

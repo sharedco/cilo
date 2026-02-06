@@ -27,22 +27,22 @@ func TestEnvRenderExample(t *testing.T) {
 
 	envName := "e2e-env-render"
 
-	if err := runCilo(moduleDir, "destroy", envName, "--force"); err != nil {
+	if err := runCilo(moduleDir, "destroy", envName, "--force", "--project", "env-render"); err != nil {
 		// ignore destroy errors; env may not exist
 		_ = err
 	}
 
-	if err := runCilo(moduleDir, "create", envName, "--from", fromPath); err != nil {
+	if err := runCilo(moduleDir, "create", envName, "--from", fromPath, "--project", "env-render"); err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
-	if err := runCilo(moduleDir, "up", envName); err != nil {
+	if err := runCilo(moduleDir, "up", envName, "--project", "env-render"); err != nil {
 		t.Fatalf("up failed: %v", err)
 	}
 	defer func() {
-		_ = runCilo(moduleDir, "destroy", envName, "--force")
+		_ = runCilo(moduleDir, "destroy", envName, "--force", "--project", "env-render")
 	}()
 
-	workspace, err := runCiloOutput(moduleDir, "path", envName)
+	workspace, err := runCiloOutput(moduleDir, "path", envName, "--project", "env-render")
 	if err != nil {
 		t.Fatalf("path failed: %v", err)
 	}
@@ -72,19 +72,19 @@ func TestCiloBasicExample(t *testing.T) {
 	}
 
 	envName := "e2e-basic"
-	_ = runCilo(moduleDir, "destroy", envName, "--force")
+	_ = runCilo(moduleDir, "destroy", envName, "--force", "--project", "basic-project")
 
-	if err := runCilo(moduleDir, "create", envName, "--from", fromPath); err != nil {
+	if err := runCilo(moduleDir, "create", envName, "--from", fromPath, "--project", "basic-project"); err != nil {
 		t.Fatalf("create failed: %v", err)
 	}
-	if err := runCilo(moduleDir, "up", envName); err != nil {
+	if err := runCilo(moduleDir, "up", envName, "--project", "basic-project"); err != nil {
 		t.Fatalf("up failed: %v", err)
 	}
 	defer func() {
-		_ = runCilo(moduleDir, "destroy", envName, "--force")
+		_ = runCilo(moduleDir, "destroy", envName, "--force", "--project", "basic-project")
 	}()
 
-	psOutput, err := runCiloOutput(moduleDir, "compose", envName, "ps")
+	psOutput, err := runCiloOutput(moduleDir, "compose", envName, "ps", "--project", "basic-project")
 	if err != nil {
 		t.Fatalf("compose ps failed: %v", err)
 	}

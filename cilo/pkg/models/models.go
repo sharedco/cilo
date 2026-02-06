@@ -4,23 +4,41 @@ import (
 	"time"
 )
 
-// State represents the global cilo state
+// State represents global cilo state
 type State struct {
-	Version       int                     `json:"version"`
-	SubnetCounter int                     `json:"subnet_counter"`
+	Version       int                        `json:"version"`
+	SubnetCounter int                        `json:"subnet_counter"`
+	Hosts         map[string]*Host          `json:"hosts"`
+	SharedNetworks map[string]*SharedNetwork `json:"shared_networks,omitempty"`
+}
+
+// Host represents a machine or server where environments run
+type Host struct {
+	ID           string                 `json:"id"`
+	Provider     string                 `json:"provider,omitempty"`
+	MeshProvider string                 `json:"mesh_provider,omitempty"`
+	MeshID       string                 `json:"mesh_id,omitempty"`
 	Environments  map[string]*Environment `json:"environments"`
+}
+
+// SharedNetwork represents a network shared across multiple environments
+type SharedNetwork struct {
+	CreatedAt    time.Time   `json:"created_at"`
+	CreatedBy    string      `json:"created_by"` // Environment key that created it
+	ReferencedBy []string    `json:"referenced_by"` // Environment keys using it
 }
 
 // Environment represents a single isolated workspace
 type Environment struct {
-	Name      string              `json:"name"`
-	Project   string              `json:"project,omitempty"`
-	CreatedAt time.Time           `json:"created_at"`
-	Subnet    string              `json:"subnet"`
-	DNSSuffix string              `json:"dns_suffix,omitempty"`
-	Status    string              `json:"status"`
-	Source    string              `json:"source,omitempty"`
-	Services  map[string]*Service `json:"services"`
+	Name           string              `json:"name"`
+	Project        string              `json:"project,omitempty"`
+	CreatedAt      time.Time           `json:"created_at"`
+	Subnet         string              `json:"subnet"`
+	DNSSuffix      string              `json:"dns_suffix,omitempty"`
+	Status         string              `json:"status"`
+	Source         string              `json:"source,omitempty"`
+	Services       map[string]*Service `json:"services"`
+	SharedNetworks []string            `json:"shared_networks,omitempty"` // Names of shared networks
 }
 
 // Service represents a service within an environment
@@ -59,15 +77,10 @@ type ComposeFile struct {
 // ComposeNetwork represents a network configuration
 type ComposeNetwork struct {
 	Driver string       `yaml:"driver"`
-	IPAM   *ComposeIPAM `yaml:"ipam,omitempty"`
+	IPAM   *ComposeIPAMConfig `yaml:"ipam,omitempty"`
 }
 
-// ComposeIPAM represents IP address management configuration
-type ComposeIPAM struct {
-	Config []ComposeIPAMConfig `yaml:"config"`
-}
-
-// ComposeIPAMConfig represents IPAM configuration
+// ComposeIPAMConfig represents IP address management configuration
 type ComposeIPAMConfig struct {
 	Subnet string `yaml:"subnet"`
 }

@@ -68,7 +68,17 @@ func All(ctx context.Context, state *models.State) *Result {
 	result := &Result{}
 	var provider runtime.Provider = docker.NewProvider()
 
-	for envKey, env := range state.Environments {
+	// Collect all environments from all hosts
+	environments := make(map[string]*models.Environment)
+
+	for _, host := range state.Hosts {
+		for envKey, env := range host.Environments {
+			environments[envKey] = env
+		}
+	}
+
+	// Reconcile all environments
+	for envKey, env := range environments {
 		if err := Environment(ctx, env, provider); err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("%s: %w", envKey, err))
 		} else {
@@ -92,10 +102,19 @@ func FindOrphans(ctx context.Context, state *models.State) ([]OrphanedResource, 
 		return nil, err
 	}
 
+	// Collect all environments for checking
+	environments := make(map[string]*models.Environment)
+
+	for _, host := range state.Hosts {
+		for envKey, env := range host.Environments {
+			environments[envKey] = env
+		}
+	}
+
 	for _, net := range networks {
 		// Check if network belongs to a tracked environment
 		found := false
-		for _, env := range state.Environments {
+		for _, env := range environments {
 			expectedNetName := fmt.Sprintf("cilo_%s", env.Name)
 			if net == expectedNetName {
 				found = true

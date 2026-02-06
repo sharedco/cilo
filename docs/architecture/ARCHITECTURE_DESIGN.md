@@ -525,6 +525,22 @@ func UpdateDNS(state *State) error {
 }
 ```
 
+#### Custom DNS Suffixes
+
+By default, cilo uses `.test` as the TLD for all environment services. This is configurable per-project via the `dns_suffix` setting in `.cilo/config.yml`.
+
+**Workflow:**
+1.  **Project Level:** Set `dns_suffix: .localhost` in `config.yml`.
+2.  **Environment Level:** During `cilo up`, the suffix is read and injected into the DNS rendering logic.
+3.  **System Level:** The system resolver must be configured to forward the custom suffix to `127.0.0.1:5354`. This is handled by `cilo dns setup --dns-suffix .localhost`.
+
+**The `.localhost` Conflict:**
+Using `.localhost` as a suffix presents unique challenges:
+- **Standard Behavior:** RFC 6761 specifies that `localhost` should resolve to `127.0.0.1`. Many browsers and OS resolvers hardcode this.
+- **Cilo Behavior:** If cilo takes over `.localhost`, it will resolve subdomains (e.g., `api.dev.localhost`) to internal container IPs (e.g., `10.224.1.2`).
+- **Conflict:** If a user is running a service directly on their host (e.g., `localhost:3000`) and tries to use `app.localhost` to point to it, cilo might intercept it if an environment is named `app`. 
+- **Recommendation:** Use `.test` (RFC 6761 reserved for testing) to avoid conflicts with system defaults. Use `.localhost` only if you explicitly want to override local service discovery with cilo's container-based discovery.
+
 #### DNS for Remote Environments
 
 > **⚠️ DESIGN GATE:** This section describes ONE CANDIDATE routing model. The actual model must be chosen before implementation per [Phase 2B: Remote Operation](../phases/PHASE_2B_REMOTE_OPERATION.md). Do not implement this until the design gate is resolved.

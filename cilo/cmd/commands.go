@@ -248,6 +248,12 @@ func init() {
 
 	execCmd.Flags().BoolP("interactive", "i", true, "Keep STDIN open")
 	execCmd.Flags().BoolP("tty", "t", true, "Allocate a pseudo-TTY")
+
+	statusCmd.Flags().String("project", "", "Project name (defaults to configured project)")
+	logsCmd.Flags().String("project", "", "Project name (defaults to configured project)")
+	execCmd.Flags().String("project", "", "Project name (defaults to configured project)")
+	pathCmd.Flags().String("project", "", "Project name (defaults to configured project)")
+	composeCmd.Flags().String("project", "", "Project name (defaults to configured project)")
 }
 
 func listTable(envs []*models.Environment, all bool) error {

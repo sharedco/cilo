@@ -63,9 +63,12 @@ func loadStateUnsafe() (*models.State, error) {
 		return nil, fmt.Errorf("failed to parse state: %w", err)
 	}
 
-	// Initialize map if nil (for backwards compatibility)
-	if state.Environments == nil {
-		state.Environments = make(map[string]*models.Environment)
+	// Initialize maps if nil
+	if state.Hosts == nil {
+		state.Hosts = make(map[string]*models.Host)
+	}
+	if state.SharedNetworks == nil {
+		state.SharedNetworks = make(map[string]*models.SharedNetwork)
 	}
 
 	return &state, nil

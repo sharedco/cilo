@@ -53,7 +53,13 @@ Use --fix to automatically repair issues.`,
 			fmt.Printf("❌ %v\n", err)
 			return nil
 		}
-		fmt.Printf("✅ (%d environments)\n", len(st.Environments))
+
+		// Count environments from all hosts
+		envCount := 0
+		for _, host := range st.Hosts {
+			envCount += len(host.Environments)
+		}
+		fmt.Printf("✅ (%d environments)\n", envCount)
 
 		// Reconcile environments
 		fmt.Println("\n📊 Reconciling environments...")

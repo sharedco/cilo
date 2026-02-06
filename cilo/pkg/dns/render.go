@@ -12,7 +12,7 @@ import (
 	"github.com/cilo/cilo/pkg/models"
 )
 
-// RenderConfig generates a complete dnsmasq configuration from the current state.
+// RenderConfig generates a complete dnsmasq configuration from current state.
 // It includes system resolver detection and all environment/service DNS entries.
 func RenderConfig(state *models.State) (string, error) {
 	var sb strings.Builder
@@ -39,54 +39,60 @@ func RenderConfig(state *models.State) (string, error) {
 	sb.WriteString("\n")
 
 	// Environment and service DNS entries
-	if state != nil && len(state.Environments) > 0 {
+	if state != nil && len(state.Hosts) > 0 {
 		sb.WriteString("# Environment services\n")
-		for envKey, env := range state.Environments {
-			if env == nil || len(env.Services) == 0 {
-				continue
+		for hostID, host := range state.Hosts {
+			if len(host.Environments) > 0 {
+				sb.WriteString(fmt.Sprintf("# Host: %s\n", hostID))
+
+				for envKey, env := range host.Environments {
+					if env == nil || len(env.Services) == 0 {
+						continue
+					}
+
+					sb.WriteString(fmt.Sprintf("# Environment: %s\n", envKey))
+
+					// Generate address entries for each service
+					for _, svc := range env.Services {
+						if svc == nil || svc.IP == "" {
+							continue
+						}
+
+						suffix := env.DNSSuffix
+						if suffix == "" {
+							suffix = ".test"
+						}
+
+						// Service-specific hostname
+						hostname := fmt.Sprintf("%s.%s%s", svc.Name, env.Name, suffix)
+						sb.WriteString(fmt.Sprintf("address=/%s/%s\n", hostname, svc.IP))
+
+						// Additional hostnames from service config
+						for _, customHostname := range svc.Hostnames {
+							sb.WriteString(fmt.Sprintf("address=/%s/%s\n", customHostname, svc.IP))
+						}
+
+						// Wildcard and apex entries for ingress services
+						if svc.IsIngress {
+							// Wildcard: *.project.envname.test
+							wildcardHostname := fmt.Sprintf(".%s.%s%s", env.Project, env.Name, suffix)
+							sb.WriteString(fmt.Sprintf("address=/%s/%s\n", wildcardHostname, svc.IP))
+
+							// Apex: project.envname.test
+							apexHostname := fmt.Sprintf("%s.%s%s", env.Project, env.Name, suffix)
+							sb.WriteString(fmt.Sprintf("address=/%s/%s\n", apexHostname, svc.IP))
+						}
+					}
+					sb.WriteString("\n")
+				}
 			}
-
-			sb.WriteString(fmt.Sprintf("# Environment: %s\n", envKey))
-
-			// Generate address entries for each service
-			for _, svc := range env.Services {
-				if svc == nil || svc.IP == "" {
-					continue
-				}
-
-				suffix := env.DNSSuffix
-				if suffix == "" {
-					suffix = ".test"
-				}
-
-				// Service-specific hostname
-				hostname := fmt.Sprintf("%s.%s%s", svc.Name, env.Name, suffix)
-				sb.WriteString(fmt.Sprintf("address=/%s/%s\n", hostname, svc.IP))
-
-				// Additional hostnames from service config
-				for _, customHostname := range svc.Hostnames {
-					sb.WriteString(fmt.Sprintf("address=/%s/%s\n", customHostname, svc.IP))
-				}
-
-				// Wildcard and apex entries for ingress services
-				if svc.IsIngress {
-					// Wildcard: *.project.envname.test
-					wildcardHostname := fmt.Sprintf(".%s.%s%s", env.Project, env.Name, suffix)
-					sb.WriteString(fmt.Sprintf("address=/%s/%s\n", wildcardHostname, svc.IP))
-
-					// Apex: project.envname.test
-					apexHostname := fmt.Sprintf("%s.%s%s", env.Project, env.Name, suffix)
-					sb.WriteString(fmt.Sprintf("address=/%s/%s\n", apexHostname, svc.IP))
-				}
-			}
-			sb.WriteString("\n")
 		}
 	}
 
 	return sb.String(), nil
 }
 
-// getSystemUpstreams detects system DNS servers based on the operating system.
+// getSystemUpstreams detects system DNS servers based on operating system.
 // For Linux, it checks systemd-resolved first, then /etc/resolv.conf.
 // For macOS, it uses scutil --dns.
 // Returns a list of upstream DNS servers, or empty if detection fails.

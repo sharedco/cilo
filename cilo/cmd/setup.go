@@ -33,7 +33,10 @@ Examples:
   cilo setup --compose ./docker/docker-compose.yml
 
   # Setup with multiple compose files
-  cilo setup --compose docker-compose.yml --compose docker-compose.prod.yml`,
+  cilo setup --compose docker-compose.yml --compose docker-compose.prod.yml
+  
+  # Setup with custom DNS suffix
+  cilo setup --dns-suffix .localhost`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Check if already configured
 		configPath := ".cilo/config.yml"

@@ -12,7 +12,7 @@ This directory contains architectural and implementation documentation for Cilo.
 
 ### Phase Implementation Guides
 - **[Phase 0: Runtime Abstraction](./phases/PHASE_0_RUNTIME_ABSTRACTION.md)** ✅ Complete - Provider interface
-- **[Phase 1: Foundations](./phases/PHASE_1_FOUNDATIONS.md)** ✅ Complete (v0.1.20) - File locking, atomic writes, DNS render
+- **[Phase 1: Foundations](./phases/PHASE_1_FOUNDATIONS.md)** ✅ Complete (v0.2.0) - File locking, atomic writes, DNS render
 - **[Phase 1B: `cilo run` Command](./phases/PHASE_1B_CILO_RUN.md)** ✅ Complete - Agent-first workflow
 - **[Phase 2A: Shared Resources](./phases/PHASE_2A_SHARED_RESOURCES.md)** 📝 Optional - Not yet implemented
 - **[Phase 2B: Remote Operation](./phases/PHASE_2B_REMOTE_OPERATION.md)** 📝 Draft - Requires routing model decision
@@ -83,7 +83,7 @@ Phase 1: Foundations ←──────────┐
 ## Current Status
 
 - [x] Phase 0: Runtime Abstraction ✅
-- [x] Phase 1: Foundations ✅ (v0.1.20 - stable foundation)
+- [x] Phase 1: Foundations ✅ (v0.2.0 - stable foundation)
 - [x] Phase 1B: `cilo run` Command ✅
 - [ ] Phase 2A: Shared Resources 📝 Optional
 - [ ] Phase 2B: Remote Operation 📝 Draft

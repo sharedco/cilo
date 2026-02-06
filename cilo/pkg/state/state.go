@@ -38,7 +38,21 @@ func parseEnvKey(key string) (project, name string, err error) {
 	return parts[0], parts[1], nil
 }
 
-// InitializeState creates the initial state file if it doesn't exist
+// getLocalHost returns the local host, creating it if needed
+func getLocalHost(state *models.State) *models.Host {
+	host, exists := state.Hosts["local"]
+	if !exists {
+		host = &models.Host{
+			ID:          "local",
+			Provider:    "docker",
+			Environments: make(map[string]*models.Environment),
+		}
+		state.Hosts["local"] = host
+	}
+	return host
+}
+
+// InitializeState creates initial state file if it doesn't exist
 func InitializeState() error {
 	path := getStatePath()
 
@@ -48,14 +62,21 @@ func InitializeState() error {
 	}
 
 	state := &models.State{
-		Version:       1,
+		Version: 2,
 		SubnetCounter: 0,
-		Environments:  make(map[string]*models.Environment),
+		Hosts: map[string]*models.Host{
+			"local": {
+				ID:          "local",
+				Provider:    "docker",
+				Environments: make(map[string]*models.Environment),
+			},
+		},
+		SharedNetworks: make(map[string]*models.SharedNetwork),
 	}
 	return SaveState(state)
 }
 
-// LoadState loads the state from disk
+// LoadState loads state from disk
 func LoadState() (*models.State, error) {
 	path := getStatePath()
 	data, err := os.ReadFile(path)
@@ -71,15 +92,18 @@ func LoadState() (*models.State, error) {
 		return nil, fmt.Errorf("failed to parse state: %w", err)
 	}
 
-	// Initialize map if nil (for backwards compatibility)
-	if state.Environments == nil {
-		state.Environments = make(map[string]*models.Environment)
+	// Initialize maps if nil
+	if state.Hosts == nil {
+		state.Hosts = make(map[string]*models.Host)
+	}
+	if state.SharedNetworks == nil {
+		state.SharedNetworks = make(map[string]*models.SharedNetwork)
 	}
 
 	return &state, nil
 }
 
-// SaveState saves the state to disk
+// SaveState saves state to disk
 func SaveState(state *models.State) error {
 	path := getStatePath()
 	data, err := json.MarshalIndent(state, "", "  ")
@@ -102,7 +126,8 @@ func GetEnvironment(project, name string) (*models.Environment, error) {
 	}
 
 	key := makeEnvKey(project, name)
-	env, exists := state.Environments[key]
+	host := getLocalHost(state)
+	env, exists := host.Environments[key]
 	if !exists {
 		return nil, fmt.Errorf("environment %q does not exist in project %q", name, project)
 	}
@@ -117,7 +142,8 @@ func GetEnvironmentByKey(key string) (*models.Environment, error) {
 		return nil, err
 	}
 
-	env, exists := state.Environments[key]
+	host := getLocalHost(state)
+	env, exists := host.Environments[key]
 	if !exists {
 		return nil, fmt.Errorf("environment %q does not exist", key)
 	}
@@ -133,7 +159,8 @@ func EnvironmentExists(project, name string) (bool, error) {
 	}
 
 	key := makeEnvKey(project, name)
-	_, exists := state.Environments[key]
+	host := getLocalHost(state)
+	_, exists := host.Environments[key]
 	return exists, nil
 }
 
@@ -142,8 +169,9 @@ func CreateEnvironment(name string, source string, project string) (*models.Envi
 	var env *models.Environment
 
 	err := WithLock(func(state *models.State) error {
+		host := getLocalHost(state)
 		key := makeEnvKey(project, name)
-		if _, exists := state.Environments[key]; exists {
+		if _, exists := host.Environments[key]; exists {
 			return fmt.Errorf("environment %q already exists in project %q", name, project)
 		}
 
@@ -160,15 +188,12 @@ func CreateEnvironment(name string, source string, project string) (*models.Envi
 
 		collision, collidingNet, err := network.CheckSubnetCollision(ctx, subnet)
 		if err != nil {
-			// Log warning but continue - don't fail on detection errors
 			fmt.Printf("Warning: could not check subnet collision: %v\n", err)
 		} else if collision {
-			// Try next subnet
 			fmt.Printf("Subnet %s conflicts with Docker network %s, trying next...\n", subnet, collidingNet)
 			state.SubnetCounter++
 			subnet = fmt.Sprintf("%s%d.0/24", baseSubnet, state.SubnetCounter)
 
-			// Check once more
 			collision2, collidingNet2, _ := network.CheckSubnetCollision(ctx, subnet)
 			if collision2 {
 				return fmt.Errorf("failed to allocate non-conflicting subnet (conflicts with %s)", collidingNet2)
@@ -185,7 +210,7 @@ func CreateEnvironment(name string, source string, project string) (*models.Envi
 			Services:  make(map[string]*models.Service),
 		}
 
-		state.Environments[key] = env
+		host.Environments[key] = env
 		return nil
 	})
 
@@ -195,8 +220,9 @@ func CreateEnvironment(name string, source string, project string) (*models.Envi
 // UpdateEnvironment updates an environment in state
 func UpdateEnvironment(env *models.Environment) error {
 	return WithLock(func(state *models.State) error {
+		host := getLocalHost(state)
 		key := makeEnvKey(env.Project, env.Name)
-		state.Environments[key] = env
+		host.Environments[key] = env
 		return nil
 	})
 }
@@ -204,8 +230,9 @@ func UpdateEnvironment(env *models.Environment) error {
 // DeleteEnvironment removes an environment from state
 func DeleteEnvironment(project, name string) error {
 	return WithLock(func(state *models.State) error {
+		host := getLocalHost(state)
 		key := makeEnvKey(project, name)
-		delete(state.Environments, key)
+		delete(host.Environments, key)
 		return nil
 	})
 }
@@ -213,7 +240,8 @@ func DeleteEnvironment(project, name string) error {
 // DeleteEnvironmentByKey removes an environment by its full key
 func DeleteEnvironmentByKey(key string) error {
 	return WithLock(func(state *models.State) error {
-		delete(state.Environments, key)
+		host := getLocalHost(state)
+		delete(host.Environments, key)
 		return nil
 	})
 }
@@ -225,9 +253,12 @@ func ListEnvironments() ([]*models.Environment, error) {
 		return nil, err
 	}
 
-	envs := make([]*models.Environment, 0, len(state.Environments))
-	for _, env := range state.Environments {
-		envs = append(envs, env)
+	envs := make([]*models.Environment, 0)
+
+	for _, host := range state.Hosts {
+		for _, env := range host.Environments {
+			envs = append(envs, env)
+		}
 	}
 
 	return envs, nil
@@ -241,10 +272,12 @@ func ListEnvironmentsByProject(project string) ([]*models.Environment, error) {
 	}
 
 	envs := make([]*models.Environment, 0)
-	for key, env := range state.Environments {
-		// Parse the key to check project
-		if strings.HasPrefix(key, project+"/") {
-			envs = append(envs, env)
+
+	for _, host := range state.Hosts {
+		for key, env := range host.Environments {
+			if strings.HasPrefix(key, project+"/") {
+				envs = append(envs, env)
+			}
 		}
 	}
 

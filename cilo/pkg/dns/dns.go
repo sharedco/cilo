@@ -85,7 +85,10 @@ func loadStateForDNS() (*models.State, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Return empty state if file doesn't exist
-			return &models.State{Environments: make(map[string]*models.Environment)}, nil
+			return &models.State{
+				Version: 2,
+				Hosts:   make(map[string]*models.Host),
+			}, nil
 		}
 		return nil, fmt.Errorf("failed to read state: %w", err)
 	}

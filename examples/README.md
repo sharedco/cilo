@@ -44,3 +44,7 @@ This example exists to make that desired capability concrete.
 ### `examples/env-render`
 
 Shows config-driven env rendering (`.cilo/config.yml` + `.env` tokens) and `env_files` support.
+
+### `examples/custom-dns-suffix`
+
+Demonstrates how to change the TLD from `.test` to `.localhost` (or any other suffix).

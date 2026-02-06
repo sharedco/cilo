@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"github.com/cilo/cilo/pkg/compose"
 	"github.com/cilo/cilo/pkg/dns"
 	envpkg "github.com/cilo/cilo/pkg/env"
+	"github.com/cilo/cilo/pkg/filesystem"
 	"github.com/cilo/cilo/pkg/models"
 	"github.com/cilo/cilo/pkg/runtime"
 	"github.com/cilo/cilo/pkg/runtime/docker"
@@ -403,12 +403,12 @@ func copyProject(src, dst string, opts CopyOptions) error {
 			}
 		}
 
-		return copyFile(path, dstPath)
+		return filesystem.CopyFile(path, dstPath)
 	})
 }
 
 func shouldSkipDotDir(name string, opts CopyOptions) bool {
-	if name == ".cilo" {
+	if name == ".cilo" || name == ".git" {
 		return false
 	}
 	for _, ignore := range opts.IgnoreDotDirs {
@@ -428,21 +428,4 @@ func shouldSkipDotDir(name string, opts CopyOptions) bool {
 	}
 
 	return true
-}
-
-func copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
-
-	destFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	_, err = io.Copy(destFile, sourceFile)
-	return err
 }

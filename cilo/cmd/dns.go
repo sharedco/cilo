@@ -28,13 +28,19 @@ This command requires elevated permissions to modify system DNS settings.
 If you prefer to configure manually, see the commands below.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		printManual := cmd.Flags().Changed("print-manual")
+		dnsSuffix, _ := cmd.Flags().GetString("dns-suffix")
+		if dnsSuffix == "" {
+			dnsSuffix = ".test"
+		}
+		// Remove leading dot for system config if present, we'll add it where needed
+		cleanSuffix := strings.TrimPrefix(dnsSuffix, ".")
 
 		if printManual {
-			printDNSManual()
+			printDNSManual(cleanSuffix)
 			return nil
 		}
 
-		fmt.Println("Setting up DNS for cilo...")
+		fmt.Printf("Setting up DNS for cilo (suffix: .%s)...\n", cleanSuffix)
 		fmt.Println()
 
 		if err := checkDNSMasqRunning(); err != nil {
@@ -42,7 +48,7 @@ If you prefer to configure manually, see the commands below.`,
 			if err := dns.SetupDNS(); err != nil {
 				fmt.Printf("✗ Failed to start dnsmasq: %v\n", err)
 				fmt.Println()
-				printDNSManual()
+				printDNSManual(cleanSuffix)
 				return fmt.Errorf("dns setup failed")
 			}
 		}
@@ -52,18 +58,18 @@ If you prefer to configure manually, see the commands below.`,
 
 		if runtime.GOOS == "darwin" {
 			fmt.Println("Detected macOS. Configuring DNS resolver...")
-			if err := setupMacOSResolver(); err != nil {
+			if err := setupMacOSResolver(cleanSuffix); err != nil {
 				fmt.Printf("⚠ Could not auto-configure: %v\n", err)
 				fmt.Println()
-				printDNSManual()
+				printDNSManual(cleanSuffix)
 				return nil
 			}
 		} else {
 			fmt.Println("Detected Linux. Configuring systemd-resolved...")
-			if err := setupLinuxResolver(); err != nil {
+			if err := setupLinuxResolver(cleanSuffix); err != nil {
 				fmt.Printf("⚠ Could not auto-configure: %v\n", err)
 				fmt.Println()
-				printDNSManual()
+				printDNSManual(cleanSuffix)
 				return nil
 			}
 		}
@@ -72,7 +78,7 @@ If you prefer to configure manually, see the commands below.`,
 		fmt.Println("✓ DNS configured successfully!")
 		fmt.Println()
 		fmt.Println("Test it:")
-		fmt.Println("  ping nginx.demo.test")
+		fmt.Printf("  ping nginx.demo.%s\n", cleanSuffix)
 		fmt.Println()
 		fmt.Println("Note: You may need to restart your browser or run 'sudo resolvectl flush-caches'")
 
@@ -94,35 +100,53 @@ var dnsStatusCmd = &cobra.Command{
 			fmt.Println("✓ dnsmasq: running")
 		}
 
+		// Detect all configured suffixes
+		var suffixes []string
 		if runtime.GOOS == "darwin" {
-			if _, err := os.Stat("/etc/resolver/test"); err == nil {
-				fmt.Println("✓ macOS resolver: configured")
-			} else {
-				fmt.Println("✗ macOS resolver: not configured")
-				fmt.Println("  Run: cilo dns setup")
+			if entries, err := os.ReadDir("/etc/resolver"); err == nil {
+				for _, entry := range entries {
+					if entry.Name() != "README" {
+						suffixes = append(suffixes, entry.Name())
+					}
+				}
 			}
 		} else {
-			if _, err := os.Stat("/etc/systemd/resolved.conf.d/cilo.conf"); err == nil {
-				fmt.Println("✓ systemd-resolved: configured")
-			} else {
-				fmt.Println("✗ systemd-resolved: not configured")
-				fmt.Println("  Run: cilo dns setup")
+			if data, err := os.ReadFile("/etc/systemd/resolved.conf.d/cilo.conf"); err == nil {
+				lines := strings.Split(string(data), "\n")
+				for _, line := range lines {
+					if strings.HasPrefix(line, "Domains=") {
+						domains := strings.TrimPrefix(line, "Domains=")
+						parts := strings.Fields(domains)
+						for _, p := range parts {
+							suffixes = append(suffixes, strings.TrimPrefix(p, "~"))
+						}
+					}
+				}
 			}
+		}
+
+		if len(suffixes) == 0 {
+			fmt.Println("✗ No DNS suffixes configured in system resolver")
+			fmt.Println("  Run: cilo dns setup")
+		} else {
+			fmt.Printf("✓ System resolver configured for: .%s\n", strings.Join(suffixes, ", ."))
 		}
 
 		fmt.Println()
 		fmt.Println("Testing DNS resolution...")
-		if out, err := exec.Command("dig", "@127.0.0.1", "-p", "5354", "nginx.demo.test").CombinedOutput(); err == nil && strings.Contains(string(out), "10.224") {
-			fmt.Println("✓ Direct dnsmasq query: working")
-		} else {
-			fmt.Println("✗ Direct dnsmasq query: failed")
-		}
+		for _, s := range suffixes {
+			testHost := fmt.Sprintf("nginx.demo.%s", s)
+			if out, err := exec.Command("dig", "@127.0.0.1", "-p", "5354", testHost).CombinedOutput(); err == nil && strings.Contains(string(out), "10.224") {
+				fmt.Printf("✓ Direct dnsmasq query (%s): working\n", testHost)
+			} else {
+				fmt.Printf("✗ Direct dnsmasq query (%s): failed (ensure an environment exists for this suffix)\n", testHost)
+			}
 
-		if out, err := exec.Command("resolvectl", "query", "nginx.demo.test").CombinedOutput(); err == nil && strings.Contains(string(out), "10.224") {
-			fmt.Println("✓ System DNS resolution: working")
-		} else {
-			fmt.Println("✗ System DNS resolution: not working")
-			fmt.Println("  Make sure systemd-resolved is configured and restarted")
+			if out, err := exec.Command("resolvectl", "query", testHost).CombinedOutput(); err == nil && strings.Contains(string(out), "10.224") {
+				fmt.Printf("✓ System DNS resolution (%s): working\n", testHost)
+			} else {
+				fmt.Printf("✗ System DNS resolution (%s): not working\n", testHost)
+			}
 		}
 
 		return nil
@@ -162,20 +186,33 @@ func checkDNSMasqRunning() error {
 	return cmd.Run()
 }
 
-func setupLinuxResolver() error {
+func setupLinuxResolver(suffix string) error {
 	confDir := "/etc/systemd/resolved.conf.d"
 	confFile := filepath.Join(confDir, "cilo.conf")
 
-	if _, err := os.Stat(confFile); err == nil {
-		fmt.Println("✓ DNS resolver already configured")
-		return nil
+	domains := []string{"~" + suffix}
+
+	// Try to read existing config to be additive
+	if data, err := os.ReadFile(confFile); err == nil {
+		lines := strings.Split(string(data), "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "Domains=") {
+				existing := strings.TrimPrefix(line, "Domains=")
+				parts := strings.Fields(existing)
+				for _, p := range parts {
+					if p != "~"+suffix {
+						domains = append(domains, p)
+					}
+				}
+			}
+		}
 	}
 
-	config := `[Resolve]
+	config := fmt.Sprintf(`[Resolve]
 DNS=127.0.0.1:5354
-Domains=~test
+Domains=%s
 DNSStubListener=yes
-`
+`, strings.Join(domains, " "))
 
 	if err := os.MkdirAll(confDir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
@@ -185,7 +222,7 @@ DNSStubListener=yes
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
-	fmt.Println("✓ Created /etc/systemd/resolved.conf.d/cilo.conf")
+	fmt.Printf("✓ Updated /etc/systemd/resolved.conf.d/cilo.conf (Domains=%s)\n", strings.Join(domains, " "))
 
 	if err := exec.Command("systemctl", "restart", "systemd-resolved").Run(); err != nil {
 		return fmt.Errorf("failed to restart systemd-resolved: %w", err)
@@ -195,14 +232,9 @@ DNSStubListener=yes
 	return nil
 }
 
-func setupMacOSResolver() error {
+func setupMacOSResolver(suffix string) error {
 	resolverDir := "/etc/resolver"
-	resolverFile := filepath.Join(resolverDir, "test")
-
-	if _, err := os.Stat(resolverFile); err == nil {
-		fmt.Println("✓ DNS resolver already configured")
-		return nil
-	}
+	resolverFile := filepath.Join(resolverDir, suffix)
 
 	config := "nameserver 127.0.0.1\nport 5354\n"
 
@@ -214,11 +246,11 @@ func setupMacOSResolver() error {
 		return fmt.Errorf("requires sudo privileges: %w", err)
 	}
 
-	fmt.Println("✓ Created /etc/resolver/test")
+	fmt.Printf("✓ Created /etc/resolver/%s\n", suffix)
 	return nil
 }
 
-func printDNSManual() {
+func printDNSManual(suffix string) {
 	fmt.Println(strings.Repeat("=", 60))
 	fmt.Println("MANUAL DNS SETUP REQUIRED")
 	fmt.Println(strings.Repeat("=", 60))
@@ -228,8 +260,8 @@ func printDNSManual() {
 		fmt.Println("Run these commands with sudo:")
 		fmt.Println()
 		fmt.Println("  sudo mkdir -p /etc/resolver")
-		fmt.Println("  echo 'nameserver 127.0.0.1' | sudo tee /etc/resolver/test")
-		fmt.Println("  echo 'port 5354' | sudo tee -a /etc/resolver/test")
+		fmt.Printf("  echo 'nameserver 127.0.0.1' | sudo tee /etc/resolver/%s\n", suffix)
+		fmt.Printf("  echo 'port 5354' | sudo tee -a /etc/resolver/%s\n", suffix)
 	} else {
 		fmt.Println("Run these commands with sudo:")
 		fmt.Println()
@@ -237,7 +269,7 @@ func printDNSManual() {
 		fmt.Println("  sudo tee /etc/systemd/resolved.conf.d/cilo.conf << 'EOF'")
 		fmt.Println("  [Resolve]")
 		fmt.Println("  DNS=127.0.0.1:5354")
-		fmt.Println("  Domains=~test")
+		fmt.Printf("  Domains=~%s\n", suffix)
 		fmt.Println("  DNSStubListener=yes")
 		fmt.Println("  EOF")
 		fmt.Println("  sudo systemctl restart systemd-resolved")
@@ -245,7 +277,7 @@ func printDNSManual() {
 
 	fmt.Println()
 	fmt.Println("After running these commands, test with:")
-	fmt.Println("  ping nginx.demo.test")
+	fmt.Printf("  ping nginx.demo.%s\n", suffix)
 	fmt.Println()
 	fmt.Println(strings.Repeat("=", 60))
 }
@@ -256,4 +288,5 @@ func init() {
 	dnsCmd.AddCommand(dnsLogsCmd)
 
 	dnsSetupCmd.Flags().Bool("print-manual", false, "Print manual setup instructions")
+	dnsSetupCmd.Flags().String("dns-suffix", ".test", "DNS suffix to configure (default: .test)")
 }

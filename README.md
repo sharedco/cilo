@@ -74,7 +74,7 @@ All environments share the same DNS infrastructure set up by init.
 
 ### DNS Organization
 
-Cilo supports two DNS models:
+Cilo supports two DNS models. By default, it uses `.test` as the TLD, but this is [customizable](#custom-dns-suffix).
 
 #### Model 1: Simple (default)
 Format: `<service>.<env>.test`
@@ -98,6 +98,24 @@ pc.dev.test → 10.224.1.2 (apex)
 api.pc.dev.test → 10.224.1.2
 admin.pc.dev.test → 10.224.1.2
 ```
+
+### Custom DNS Suffix
+
+By default, cilo uses `.test` as the DNS suffix. You can customize this during project setup or in your configuration.
+
+**Setup with custom suffix:**
+```bash
+cilo setup --dns-suffix .localhost
+```
+
+**System Configuration:**
+The system DNS resolver must be configured to forward your custom suffix to cilo.
+```bash
+cilo dns setup --dns-suffix .localhost
+```
+
+**Note on `.localhost`:**
+Using `.localhost` as a suffix will direct any matching domains (e.g., `api.dev.localhost`) to cilo's internal container IPs. Bare `localhost` will continue to work as normal unless you have a project or environment named `localhost`. Be aware that some browsers and OS resolvers hardcode `.localhost` to `127.0.0.1`, which may require additional configuration to override.
 
 ## Defining Hostnames
 
@@ -155,7 +173,7 @@ cilo hostnames add <env> <hostname>...
 cilo hostnames remove <env> <hostname>...
 cilo hostnames set <env> --file <file>
 
-# Health check and repair (v0.1.20+)
+# Health check and repair (v0.2.0+)
 cilo doctor              # Check system health
 cilo doctor --fix        # Fix issues automatically
 
@@ -195,7 +213,7 @@ resolvectl query nginx.dev.test
 sudo resolvectl flush-caches
 ```
 
-## System Reliability (v0.1.20+)
+## System Reliability (v0.2.0+)
 
 Cilo now has a hardened foundation for concurrent use:
 
