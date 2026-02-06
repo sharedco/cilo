@@ -1,0 +1,19 @@
+services:
+  nginx:
+    image: nginx:alpine
+    labels:
+      cilo.hostnames: "pc,cpanel.pc"
+    volumes:
+      - ./html:/usr/share/nginx/html
+
+  api:
+    image: python:3.11-alpine
+    command: python -m http.server 8080
+    working_dir: /app
+    volumes:
+      - ./api:/app
+    labels:
+      cilo.hostnames: "api.pc"
+
+  redis:
+    image: redis:7-alpine

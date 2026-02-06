@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cilo Demo (basic-2)</title>
+    <style>
+        body { font-family: sans-serif; margin: 40px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { color: #333; }
+        .info { background: #f8f0ff; padding: 20px; border-radius: 5px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Cilo Demo (basic-2)</h1>
+        <p>Second example project.</p>
+        <div class="info">
+            <p><strong>Environment:</strong> <span id="env"></span></p>
+        </div>
+    </div>
+    <script>
+        document.getElementById('env').textContent = window.location.hostname;
+    </script>
+</body>
+</html>

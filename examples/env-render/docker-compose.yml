@@ -1,0 +1,23 @@
+version: "3.8"
+
+services:
+  nginx:
+    image: nginx:alpine
+    env_file:
+      - .env
+    command: >
+      /bin/sh -c "printf 'APP_NAME=%s\nBASE_URL=%s\n' \"$APP_NAME\" \"$BASE_URL\" > /usr/share/nginx/html/env.txt && nginx -g 'daemon off;'"
+
+  node-api:
+    image: node:18-alpine
+    env_file:
+      - envs/node/.env
+    command: >
+      /bin/sh -c "node -e \"const http=require('http');const port=3000;http.createServer((req,res)=>{res.end('SERVICE_NAME='+(process.env.SERVICE_NAME||'')+'\\nBASE_URL='+(process.env.BASE_URL||'')+'\\n');}).listen(port,'0.0.0.0');\""
+
+  python-api:
+    image: python:3.11-slim
+    env_file:
+      - envs/python/.env
+    command: >
+      /bin/sh -c "printf 'SERVICE_NAME=%s\\nBASE_URL=%s\\n' \"$SERVICE_NAME\" \"$BASE_URL\" > /tmp/env.txt && python -m http.server 8000 --directory /tmp"

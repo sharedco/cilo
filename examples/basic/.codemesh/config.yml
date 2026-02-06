@@ -1,0 +1,5 @@
+project: basic-project
+build_tool: docker
+compose_files:
+    - docker-compose.yml
+default_environment: dev

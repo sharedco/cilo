@@ -1,0 +1,16 @@
+project: env-render
+compose_files:
+  - docker-compose.yml
+env_files:
+  - .env
+  - envs/node/.env
+  - envs/python/.env
+env:
+  copy_mode: all
+  render:
+    - file: .env
+      tokens: true
+    - file: envs/node/.env
+      tokens: true
+    - file: envs/python/.env
+      tokens: true
