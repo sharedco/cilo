@@ -14,11 +14,11 @@
 # You want to run 3 AI agents on the same codebase simultaneously...
 
 # Agent 1: Working on feature A
-cd ~/projects/myapp && opencode agent "implement user auth"
+cd ~/projects/myapp && opencode "implement user auth"
 
-# Agent 2: Working on feature B
-cd ~/projects/myapp && opencode agent "add payment integration" 
-# ^ Agents step on each other! Shared database, shared ports, chaos.
+# Agent 2: Working on feature B  
+cd ~/projects/myapp && opencode "add payment integration"
+# ^ Agents step on each other! Same containers, same ports, chaos.
 
 # OR: You try git worktrees...
 git worktree add ../myapp-agent-2
@@ -74,7 +74,7 @@ cilo run opencode agent-1 "implement login" &
 cilo run opencode agent-2 "fix navigation" &
 cilo run opencode agent-3 "add search" &
 
-# Each agent gets:
+# Each session gets:
 # - Its own copy of the project
 # - Its own containers (database, cache, API) with isolated state
 # - Environment variables pointing to its own services
