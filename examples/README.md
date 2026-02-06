@@ -10,7 +10,7 @@ You have **one Docker Compose project** but want to run **multiple agents** simu
 # This fails—agents step on each other
 cd ~/projects/myapp && opencode "fix bug A" &
 cd ~/projects/myapp && opencode "fix bug B" &
-# Same database, same ports, chaos.
+# Same containers, same ports, chaos.
 
 # This also fails—same compose file, different folders
 git worktree add ../agent-2 && cd ../agent-2 && docker-compose up
@@ -35,7 +35,7 @@ cilo run opencode agent-3 "write tests" --from ./examples/basic &
 
 # Each agent gets its own:
 # - Isolated workspace (~/.cilo/envs/basic/agent-N/)
-# - Isolated database, cache, and API
+# - Isolated containers (database, cache, API) with separate state
 # - Unique DNS names (nginx.agent-1.test, nginx.agent-2.test, etc.)
 
 # Access each environment
@@ -141,7 +141,7 @@ echo "All features completed in isolated environments"
 
 **What happens:**
 - 5 isolated environments created
-- Each has its own database (no data pollution)
+- Each has its own containers with isolated state (no data pollution)
 - Each has unique DNS names
 - Agents work in parallel, zero conflicts
 
@@ -224,18 +224,22 @@ When using `cilo run`, these are automatically injected:
 | `CILO_ENV` | `agent-1` | Environment name (unique per agent) |
 | `CILO_PROJECT` | `myapp` | Project name (from source folder) |
 | `CILO_WORKSPACE` | `/home/user/.cilo/envs/myapp/agent-1` | Isolated workspace path |
-| `CILO_BASE_URL` | `http://myapp.agent-1.test` | Root URL for this environment |
+| `CILO_BASE_URL` | `http://myapp.agent-1.test` | Apex URL (project.env.test) for ingress service |
 | `CILO_DNS_SUFFIX` | `.test` | DNS TLD (configurable per project) |
 
 ### Service Discovery Pattern
 
 ```bash
 # Services follow predictable naming:
-# http://<service>.<project>.<env><dns_suffix>
+# http://<service>.<env><dns_suffix>
 
-API_URL="http://api.${CILO_PROJECT}.${CILO_ENV}${CILO_DNS_SUFFIX}"
-DB_URL="http://db.${CILO_PROJECT}.${CILO_ENV}${CILO_DNS_SUFFIX}"
-REDIS_URL="http://redis.${CILO_PROJECT}.${CILO_ENV}${CILO_DNS_SUFFIX}"
+API_URL="http://api.${CILO_ENV}${CILO_DNS_SUFFIX}"       # api.agent-1.test
+DB_URL="http://db.${CILO_ENV}${CILO_DNS_SUFFIX}"         # db.agent-1.test
+REDIS_URL="http://redis.${CILO_ENV}${CILO_DNS_SUFFIX}"   # redis.agent-1.test
+
+# Apex/ingress URL (from CILO_BASE_URL):
+# http://<project>.<env><dns_suffix> → routes to ingress service
+# Example: http://myapp.agent-1.test → nginx container
 ```
 
 ### Checking Environment in Scripts

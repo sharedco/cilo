@@ -44,11 +44,11 @@ cilo run opencode feature-payment "add payment integration"
 cilo run opencode feature-analytics "add analytics dashboard"
 
 # Each agent sees:
-#   - http://api.myapp.feature-auth.test (Agent 1's API)
-#   - http://api.myapp.feature-payment.test (Agent 2's API)  
-#   - http://api.myapp.feature-analytics.test (Agent 3's API)
+#   - http://api.feature-auth.test (Agent 1's API)
+#   - http://api.feature-payment.test (Agent 2's API)  
+#   - http://api.feature-analytics.test (Agent 3's API)
 #
-# Each gets its own database, redis, and network—completely isolated.
+# Each gets its own isolated containers (database, redis, etc.) and network.
 ```
 
 ---
@@ -76,7 +76,7 @@ cilo run opencode agent-3 "add search" &
 
 # Each agent gets:
 # - Its own copy of the project
-# - Its own database, cache, and API
+# - Its own containers (database, cache, API) with isolated state
 # - Environment variables pointing to its own services
 ```
 
@@ -90,7 +90,7 @@ for branch in feature-a feature-b feature-c; do
 done
 wait
 
-# Each branch tests in isolation—no database pollution between runs
+# Each branch tests in isolation—no state pollution between runs
 ```
 
 ### Pattern 3: CI/CD Parallelization
@@ -164,14 +164,19 @@ When using `cilo run`, these are injected automatically:
 | `CILO_ENV` | `agent-1` | Environment name |
 | `CILO_PROJECT` | `myapp` | Project name |
 | `CILO_WORKSPACE` | `~/.cilo/envs/myapp/agent-1` | Path to isolated workspace |
-| `CILO_BASE_URL` | `http://myapp.agent-1.test` | Root URL for this environment |
+| `CILO_BASE_URL` | `http://myapp.agent-1.test` | Apex URL (project.env.test) for ingress service |
 | `CILO_DNS_SUFFIX` | `.test` | DNS TLD (configurable) |
 
 **Service discovery:**
 ```bash
 # Services are always at predictable URLs:
-API_URL="http://api.${CILO_PROJECT}.${CILO_ENV}${CILO_DNS_SUFFIX}"
-DB_URL="http://db.${CILO_PROJECT}.${CILO_ENV}${CILO_DNS_SUFFIX}"
+# Format: http://<service>.<env><dns_suffix>
+API_URL="http://api.${CILO_ENV}${CILO_DNS_SUFFIX}"      # api.agent-1.test
+DB_URL="http://db.${CILO_ENV}${CILO_DNS_SUFFIX}"        # db.agent-1.test
+REDIS_URL="http://redis.${CILO_ENV}${CILO_DNS_SUFFIX}"  # redis.agent-1.test
+
+# Apex/ingress URL (from CILO_BASE_URL):
+# http://<project>.<env><dns_suffix> → routes to ingress service
 ```
 
 ---
@@ -190,7 +195,7 @@ sudo cilo init
 cilo run opencode demo "fix the login bug"
 
 # 4. Access the environment
-curl http://api.myapp.demo.test
+curl http://api.demo.test  # service.env.test format
 ```
 
 ---
