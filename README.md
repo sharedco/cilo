@@ -4,85 +4,175 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/sharedco/cilo/releases)
 
-**Run unlimited Docker Compose environments side-by-side. No port conflicts. Access by DNS name.**
+**Run unlimited isolated agents on the same Docker Compose project. No conflicts, no overlaps.**
 
 ---
 
 ## The Problem You Know
 
 ```bash
-# You're working on a feature...
-docker-compose up -d
-# Works! API at localhost:8080
+# You want to run 3 AI agents on the same codebase simultaneously...
 
-# PM asks you to check something on staging...
-docker-compose -f docker-compose.staging.yml up -d
-# ERROR: bind: address already in use
+# Agent 1: Working on feature A
+cd ~/projects/myapp && opencode agent "implement user auth"
+
+# Agent 2: Working on feature B
+cd ~/projects/myapp && opencode agent "add payment integration" 
+# ^ Agents step on each other! Shared database, shared ports, chaos.
+
+# OR: You try git worktrees...
+git worktree add ../myapp-agent-2
+cd ../myapp-agent-2 && docker-compose up
+# ERROR: bind: address already in use (port 5432 in use by agent 1)
+# ERROR: network name collision
 # 
-# Now you stop everything, change ports in the compose file, 
-# forget which port maps to which service, repeat tomorrow.
+# Same compose file, different folder, still conflicts.
 ```
 
 ## The Cilo Way
 
 ```bash
-# Create isolated environments
-$ cilo create feature-x --from ~/projects/myapp
-$ cilo create staging --from ~/projects/myapp
+# 3 agents, 1 codebase, zero conflicts
 
-# Run both simultaneously—zero conflicts
-$ cilo up feature-x     # API at http://api.myapp.feature-x.test
-$ cilo up staging       # API at http://api.myapp.staging.test
+# Agent 1 gets isolated environment
+cilo run opencode feature-auth "implement user authentication"
 
-# Access services by name, not port numbers
-$ curl http://api.myapp.feature-x.test/health
-$ curl http://api.myapp.staging.test/health
-```
+# Agent 2 gets isolated environment  
+cilo run opencode feature-payment "add payment integration"
 
----
+# Agent 3 gets isolated environment
+cilo run opencode feature-analytics "add analytics dashboard"
 
-## Agent-Native Workflow
-
-**One command** to create, start, and run—perfect for AI agents and automated workflows:
-
-```bash
-# Launch an agent directly in an isolated environment
-$ cilo run opencode feature-x "implement user authentication"
-
-# The agent receives these environment variables:
-#   CILO_ENV=feature-x
-#   CILO_BASE_URL=http://myapp.feature-x.test
-#   CILO_WORKSPACE=/home/user/.cilo/envs/myapp/feature-x
+# Each agent sees:
+#   - http://api.myapp.feature-auth.test (Agent 1's API)
+#   - http://api.myapp.feature-payment.test (Agent 2's API)  
+#   - http://api.myapp.feature-analytics.test (Agent 3's API)
 #
-# Services are accessible at predictable DNS names:
-#   - http://api.myapp.feature-x.test
-#   - http://db.myapp.feature-x.test
-#   - http://redis.myapp.feature-x.test
-```
-
-**Parallel testing without conflicts:**
-
-```bash
-# Run the same test suite in 3 isolated environments simultaneously
-$ cilo run npm test pr-123 -- --suite=e2e &
-$ cilo run npm test pr-124 -- --suite=e2e &
-$ cilo run npm test pr-125 -- --suite=e2e &
-
-# Each gets its own database, cache, and API—no shared state, no port hell
+# Each gets its own database, redis, and network—completely isolated.
 ```
 
 ---
 
-## Why Developers Switch
+## What Cilo Does
 
-| Without Cilo | With Cilo |
-|--------------|-----------|
-| `localhost:8080`, `localhost:3000`, `localhost:5432` | `api.myapp.dev.test`, `web.myapp.dev.test`, `db.myapp.dev.test` |
-| Port conflicts when running multiple environments | Each environment isolated on its own subnet |
-| Manually edit docker-compose.yml to change ports | Zero file modifications—non-destructive overrides |
-| Memorize port mappings | DNS auto-discovery |
-| Stop environment A to start environment B | Run unlimited environments side-by-side |
-| Agents need to track ports | Agents get `CILO_BASE_URL` injected |
+**Cilo creates isolated copies of your Docker Compose project** that run side-by-side without conflicts:
+
+- **Same source code** — All environments copy from the same project
+- **Isolated workspaces** — Each environment gets its own folder (`~/.cilo/envs/myapp/<name>/`)
+- **Isolated networks** — Each environment gets its own subnet (`10.224.x.x/24`)
+- **DNS names** — Services accessible by name, not port numbers
+
+---
+
+## The Agent Workflow
+
+### Pattern 1: Parallel Feature Development
+
+```bash
+# Run 3 agents simultaneously on the same codebase—zero overlap
+cilo run opencode agent-1 "implement login" &
+cilo run opencode agent-2 "fix navigation" &
+cilo run opencode agent-3 "add search" &
+
+# Each agent gets:
+# - Its own copy of the project
+# - Its own database, cache, and API
+# - Environment variables pointing to its own services
+```
+
+### Pattern 2: Parallel Testing
+
+```bash
+# Run the same test suite against multiple branches
+for branch in feature-a feature-b feature-c; do
+  git checkout $branch
+  cilo run npm test $branch -- --suite=e2e &
+done
+wait
+
+# Each branch tests in isolation—no database pollution between runs
+```
+
+### Pattern 3: CI/CD Parallelization
+
+```bash
+# In your CI pipeline—each PR gets isolated env
+cilo run opencode pr-$PR_NUMBER "review and fix issues"
+
+# 10 PRs = 10 isolated environments, all from the same docker-compose.yml
+```
+
+### Pattern 4: Context Switching
+
+```bash
+# Hotfix comes in while you're deep in feature work
+$ cilo run opencode feature-xyz "build new dashboard"
+^C
+
+# Switch to hotfix instantly—feature env keeps running
+$ cilo run opencode hotfix-urgent "fix payment bug"
+
+# Back to feature—environment still there, instant resume
+$ cilo run opencode feature-xyz "finish the dashboard"
+```
+
+---
+
+## How It Works
+
+```
+Your Source Code (git repo)
+└── docker-compose.yml (single source of truth)
+         │
+         │  cilo creates isolated copies:
+         │
+    ┌────┴────┬────────┬────────┐
+    │         │        │        │
+┌───▼───┐ ┌──▼───┐ ┌──▼───┐ ┌──▼───┐
+│agent-1│ │agent-│ │agent-│ │hotfix│  ← Isolated workspaces
+│       │ │  2   │ │  3   │ │      │     (~/.cilo/envs/myapp/...)
+└───┬───┘ └──┬───┘ └──┬───┘ └──┬───┘
+    │        │        │        │
+    └────────┴───┬────┴────────┘
+                 │
+        ┌────────▼────────┐
+        │ 10.224.0.0/16   │  ← Each env gets unique /24 subnet
+        │   (isolated)    │
+        └────────┬────────┘
+                 │
+        ┌────────▼────────┐
+        │  dnsmasq        │  ← Resolves *.test domains
+        │  *.test → IP    │
+        └─────────────────┘
+```
+
+**Key Principles:**
+
+1. **Isolate, Don't Modify** — Your source code stays untouched; environments are copies
+2. **DNS-First** — Access services by name (`api.agent-1.test`) not ports (`localhost:8080`)
+3. **Parallel by Default** — Run as many environments as you need, simultaneously
+4. **Agent-Native** — One command creates, starts, and runs: `cilo run <command> <env>`
+
+---
+
+## Environment Variables
+
+When using `cilo run`, these are injected automatically:
+
+| Variable | Example | Purpose |
+|----------|---------|---------|
+| `CILO_ENV` | `agent-1` | Environment name |
+| `CILO_PROJECT` | `myapp` | Project name |
+| `CILO_WORKSPACE` | `~/.cilo/envs/myapp/agent-1` | Path to isolated workspace |
+| `CILO_BASE_URL` | `http://myapp.agent-1.test` | Root URL for this environment |
+| `CILO_DNS_SUFFIX` | `.test` | DNS TLD (configurable) |
+
+**Service discovery:**
+```bash
+# Services are always at predictable URLs:
+API_URL="http://api.${CILO_PROJECT}.${CILO_ENV}${CILO_DNS_SUFFIX}"
+DB_URL="http://db.${CILO_PROJECT}.${CILO_ENV}${CILO_DNS_SUFFIX}"
+```
 
 ---
 
@@ -93,75 +183,36 @@ $ cilo run npm test pr-125 -- --suite=e2e &
 export PATH="$PATH:/var/deployment/sharedco/cilo/bin"
 (cd /var/deployment/sharedco/cilo/cilo && go build -o cilo main.go)
 
-# 2. Initialize (one-time, requires sudo for DNS setup)
+# 2. Initialize (one-time, requires sudo for DNS)
 sudo cilo init
 
-# 3. Create and run your first environment
-cilo create demo --from ./examples/basic
-cilo up demo
+# 3. Run your first isolated agent
+cilo run opencode demo "fix the login bug"
 
-# 4. Access via DNS
-curl http://nginx.demo.test
+# 4. Access the environment
+curl http://api.myapp.demo.test
 ```
 
 ---
 
-## How It Works
+## Why Teams Switch to Cilo
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Your Project                                                │
-│  └── docker-compose.yml (untouched)                         │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │
-   ┌────▼────┐    ┌────▼────┐    ┌────▼────┐
-   │ feature │    │ staging │    │  demo   │  ← Isolated workspaces
-   │   -x    │    │         │    │         │     (~/.cilo/envs/...)
-   └────┬────┘    └────┬────┘    └────┬────┘
-        │              │              │
-        └──────────────┼──────────────┘
-                       │
-              ┌────────▼────────┐
-              │  10.224.x.x/24  │  ← Each env gets unique subnet
-              │   (isolated)    │
-              └────────┬────────┘
-                       │
-              ┌────────▼────────┐
-              │  dnsmasq        │  ← Resolves *.test domains
-              │  *.test → IP    │
-              └─────────────────┘
-```
-
-**Key Principles:**
-
-1. **DNS-First Discovery** — Services are accessed by name (`api.myapp.dev.test`) not port numbers
-2. **Complete Isolation** — Each environment gets its own `/24` subnet (`10.224.x.x`)
-3. **Zero File Modifications** — Cilo generates hidden `.cilo/override.yml` files; your source is never touched
-4. **Atomic Operations** — State and DNS updates are atomic; safe for concurrent agent usage
+| Without Cilo | With Cilo |
+|--------------|-----------|
+| Agents step on each other's files/database | Each agent has isolated workspace |
+| Can't run multiple agents on same project | Unlimited parallel environments |
+| Port conflicts when using git worktrees | Each environment gets unique subnet |
+| "Wait, which port is this agent using?" | Predictable DNS names per environment |
+| Manual docker-compose overrides | Zero file modifications—fully automated |
 
 ---
 
 ## Documentation
 
-- **[Core Architecture](docs/ARCHITECTURE.md)** — Subnet model, DNS discovery, state management
-- **[Operations & Setup](docs/OPERATIONS.md)** — Setup, troubleshooting with `cilo doctor`, teardown
-- **[Examples](examples/)** — Practical configurations and use cases
-- **[Future: Remote & Mesh](docs/REMOTE_NETWORKING.md)** — Multi-host networking vision
-
----
-
-## Comparison
-
-| Feature | Docker Compose | Cilo |
-|---------|----------------|------|
-| **Service Access** | Port mapping (`:8080`) | DNS (`service.env.test`) |
-| **Multi-Instance** | Manual port management | Automatic & transparent |
-| **Isolation** | Shared ports/networks | Dedicated subnets per env |
-| **File Safety** | In-place edits required | Non-destructive overrides |
-| **Agent Support** | High friction (track ports) | Native (`CILO_BASE_URL`) |
-| **Parallel Environments** | Not possible | Unlimited |
+- **[Examples](examples/)** — Real-world agent patterns and workflows
+- **[Core Architecture](docs/ARCHITECTURE.md)** — How isolation works
+- **[Operations & Setup](docs/OPERATIONS.md)** — Troubleshooting and maintenance
+- **[Future: Remote & Mesh](docs/REMOTE_NETWORKING.md)** — Multi-host agent distribution
 
 ---
 

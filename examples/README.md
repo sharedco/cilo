@@ -1,23 +1,47 @@
 # Cilo Examples
 
-Real-world patterns for using Cilo in development and CI/CD workflows.
+Real-world patterns for running multiple AI agents in isolated environments.
 
-## Quickstart: First Time User
+## The Core Problem
+
+You have **one Docker Compose project** but want to run **multiple agents** simultaneously:
 
 ```bash
-# 1. Initialize cilo (one-time setup)
+# This fails—agents step on each other
+cd ~/projects/myapp && opencode "fix bug A" &
+cd ~/projects/myapp && opencode "fix bug B" &
+# Same database, same ports, chaos.
+
+# This also fails—same compose file, different folders
+git worktree add ../agent-2 && cd ../agent-2 && docker-compose up
+# ERROR: bind: address already in use
+# ERROR: network name collision
+```
+
+**Cilo solves this:** Each agent gets its own isolated copy with isolated networks.
+
+---
+
+## Quickstart: Run 3 Agents
+
+```bash
+# Initialize cilo (one-time)
 cilo init
 
-# 2. Create an environment from any example
-cilo create demo --from ./examples/basic
-cilo up demo
+# Run 3 agents on the same codebase simultaneously
+cilo run opencode agent-1 "implement feature A" --from ./examples/basic &
+cilo run opencode agent-2 "implement feature B" --from ./examples/basic &
+cilo run opencode agent-3 "write tests" --from ./examples/basic &
 
-# 3. Access services via DNS
-curl http://nginx.demo.test
-curl http://api.demo.test:8080
+# Each agent gets its own:
+# - Isolated workspace (~/.cilo/envs/basic/agent-N/)
+# - Isolated database, cache, and API
+# - Unique DNS names (nginx.agent-1.test, nginx.agent-2.test, etc.)
 
-# 4. Clean up
-cilo destroy demo --force
+# Access each environment
+curl http://nginx.agent-1.test
+curl http://nginx.agent-2.test
+curl http://nginx.agent-3.test
 ```
 
 ---
@@ -26,179 +50,265 @@ cilo destroy demo --force
 
 ### `examples/basic` — Hello World
 
-A simple 3-service stack: nginx + API + redis.
+Simple 3-service stack: nginx + API + redis. Perfect for testing multi-agent isolation.
 
-**Try the agent workflow:**
+**Try it:**
 ```bash
-# One command: create, start, and run
-cilo run curl demo http://nginx.demo.test
+# Run 2 agents on the same project
+cilo run opencode demo-1 "list all files" --from ./examples/basic &
+cilo run opencode demo-2 "check the API" --from ./examples/basic &
 
-# Launch an interactive session
-cilo run bash demo
-# Inside: curl http://api.demo.test:8080/health
+# Each sees different environment variables:
+#   demo-1: CILO_ENV=demo-1, CILO_BASE_URL=http://basic.demo-1.test
+#   demo-2: CILO_ENV=demo-2, CILO_BASE_URL=http://basic.demo-2.test
 ```
 
-### `examples/basic-2` — Multi-Project Demo
+### `examples/basic-2` — Cross-Project Isolation
 
-Same topology as `basic` but different content. Use this to demonstrate running two unrelated projects simultaneously:
-
-```bash
-# Run both at the same time—zero conflicts
-cilo up demo1 --from ./examples/basic
-cilo up demo2 --from ./examples/basic-2
-
-curl http://nginx.demo1.test  # "Hello from Basic"
-curl http://nginx.demo2.test  # "Hello from Basic-2"
-```
-
-### `examples/ingress-hostnames` — Virtual Hosts
-
-Shows the "multiple hostnames behind one nginx" pattern common in production:
+Same topology as `basic` but different content. Shows Cilo handles multiple projects too:
 
 ```bash
-cilo create vhost --from ./examples/ingress-hostnames
-cilo up vhost
+# Run both projects simultaneously
+cilo up project-a --from ./examples/basic
+cilo up project-b --from ./examples/basic-2
 
-# Both hostnames resolve to the same nginx
-curl http://app.myapp.vhost.test
-curl http://admin.myapp.vhost.test
+curl http://nginx.project-a.test  # "Hello from Basic"
+curl http://nginx.project-b.test  # "Hello from Basic-2"
 ```
-
-**Use case:** Testing subdomain routing, multi-tenant apps, or API versioning.
 
 ### `examples/env-render` — Dynamic Configuration
 
-Demonstrates config-driven environment variable rendering using `.cilo/config.yml`:
+Shows how agents get environment-specific configuration:
 
 ```bash
+# Create 2 environments from the same source
 cilo create dev --from ./examples/env-render
+cilo create staging --from ./examples/env-render
 cilo up dev
+cilo up staging
 
-# See dynamically rendered values
+# Each environment renders different values
 curl http://nginx.dev.test/env.txt
-# Shows: CILO_PROJECT=myapp, CILO_ENV=dev, CILO_BASE_URL=http://myapp.dev.test
+# CILO_PROJECT=myapp, CILO_ENV=dev, CILO_BASE_URL=http://myapp.dev.test
+
+curl http://nginx.staging.test/env.txt
+# CILO_PROJECT=myapp, CILO_ENV=staging, CILO_BASE_URL=http://myapp.staging.test
 ```
 
-**Use case:** Apps that need to know their own URL, database connection strings with env-specific hosts, or injecting build metadata.
+**Use case:** Agents that need to know their own URL or connect to sibling services.
+
+### `examples/ingress-hostnames` — Virtual Hosts
+
+Demonstrates subdomain routing—useful when agents need to test multi-tenant scenarios:
+
+```bash
+cilo run opencode vhost-test "test multi-tenant routing" --from ./examples/ingress-hostnames
+
+# Inside the agent:
+# curl http://app.myapp.vhost-test.test (routes to tenant app)
+# curl http://admin.myapp.vhost-test.test (routes to admin panel)
+```
 
 ### `examples/custom-dns-suffix` — Custom TLD
 
-Change the DNS suffix from `.test` to anything you want (`.localhost`, `.dev`, etc.):
+Change from `.test` to `.localhost` or your preferred domain:
 
 ```bash
 cilo setup --name local --dns-suffix .localhost --from ./examples/custom-dns-suffix
-sudo cilo dns setup --dns-suffix .localhost
-
 cilo up local
-curl http://nginx.local.localhost  # Uses .localhost instead of .test
+curl http://nginx.local.localhost  # Uses custom suffix
 ```
-
-**Use case:** Corporate environments where `.test` is blocked, or preference for `.localhost` semantics.
 
 ---
 
-## Workflow Patterns
+## Agent Workflow Patterns
 
-### Pattern 1: The Agent Session
-
-```bash
-# Create a dedicated environment for an agent task
-cilo run opencode fix-login "fix the authentication bug in the login flow"
-
-# What happens:
-# 1. Creates 'fix-login' environment if it doesn't exist
-# 2. Starts the environment (docker-compose up)
-# 3. Launches 'opencode' with CILO_* environment variables
-#
-# The agent can immediately access:
-#   - http://api.myapp.fix-login.test
-#   - http://db.myapp.fix-login.test
-#   - $CILO_BASE_URL for API calls
-```
-
-### Pattern 2: Parallel Testing
+### Pattern 1: Parallel Feature Development
 
 ```bash
 #!/bin/bash
-# ci-test.sh - Run tests against multiple feature branches
+# Run 5 agents on different features
 
-for pr in 123 124 125; do
-  cilo run npm test "pr-$pr" -- --suite=e2e &
+FEATURES=("auth" "payment" "search" "notifications" "analytics")
+
+for feature in "${FEATURES[@]}"; do
+  cilo run opencode "$feature" "implement $feature" --from ~/projects/myapp &
 done
+
 wait
-
-# Each PR gets its own isolated database and API
-# No port conflicts, no shared state contamination
+echo "All features completed in isolated environments"
 ```
 
-### Pattern 3: Context Switching
+**What happens:**
+- 5 isolated environments created
+- Each has its own database (no data pollution)
+- Each has unique DNS names
+- Agents work in parallel, zero conflicts
+
+### Pattern 2: Parallel Testing Matrix
 
 ```bash
-# Hotfix comes in while you're working on a feature
-cilo run opencode feature-xyz "implement new dashboard"
-# ^C to exit
+#!/bin/bash
+# Test against multiple database versions simultaneously
 
-# Switch to hotfix instantly—feature env keeps running
-cilo run opencode hotfix-urgent "fix the payment bug"
+for db_version in postgres-14 postgres-15 postgres-16; do
+  export DB_VERSION=$db_version
+  cilo run npm test "test-$db_version" -- --suite=integration &
+done
 
-# Back to feature—already running, instant context switch
+wait
+```
+
+**What happens:**
+- 3 test runs in parallel
+- Each environment uses different DB version
+- No shared state between test runs
+
+### Pattern 3: CI/CD Parallelization
+
+```bash
+# .github/workflows/test.yml
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cilo init
+      - run: |
+          # Create environment for this PR
+          cilo run opencode "pr-${{ github.event.number }}" \
+            "run tests and post results" \
+            --from .
+```
+
+**What happens:**
+- Each PR gets its own isolated environment
+- Multiple PRs can be tested simultaneously
+- No "port already in use" errors in CI
+
+### Pattern 4: Safe Experimentation
+
+```bash
+# Try a risky refactor without breaking your main environment
+cilo run opencode experiment "try the risky refactor"
+
+# If it breaks, just destroy it
+cilo destroy experiment --force
+
+# Your main environment is untouched
+```
+
+### Pattern 5: Context Switching
+
+```bash
+# Morning: Working on feature
+cilo run opencode feature-xyz "build the dashboard"
+
+# Afternoon: Urgent bug reported
+^C  # Exit feature agent
+cilo run opencode hotfix "fix the critical bug"
+
+# Evening: Back to feature—environment still there, instantly
 cilo run opencode feature-xyz "finish the dashboard"
-```
-
-### Pattern 4: Staging Comparison
-
-```bash
-# Run your feature branch alongside staging
-cilo up staging
-cilo up my-feature
-
-# Compare responses
-diff <(curl -s http://api.myapp.staging.test/data) \
-     <(curl -s http://api.myapp.my-feature.test/data)
 ```
 
 ---
 
-## Environment Variables Available
+## Environment Variables Reference
 
 When using `cilo run`, these are automatically injected:
 
-| Variable | Example Value | Description |
-|----------|---------------|-------------|
-| `CILO_ENV` | `demo` | Environment name |
-| `CILO_PROJECT` | `myapp` | Project name |
-| `CILO_WORKSPACE` | `/home/user/.cilo/envs/myapp/demo` | Full path to workspace |
-| `CILO_BASE_URL` | `http://myapp.demo.test` | Root URL for the environment |
-| `CILO_DNS_SUFFIX` | `.test` | DNS TLD (configurable) |
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `CILO_ENV` | `agent-1` | Environment name (unique per agent) |
+| `CILO_PROJECT` | `myapp` | Project name (from source folder) |
+| `CILO_WORKSPACE` | `/home/user/.cilo/envs/myapp/agent-1` | Isolated workspace path |
+| `CILO_BASE_URL` | `http://myapp.agent-1.test` | Root URL for this environment |
+| `CILO_DNS_SUFFIX` | `.test` | DNS TLD (configurable per project) |
 
-**Service discovery pattern:**
+### Service Discovery Pattern
+
 ```bash
-# Services are always at:
+# Services follow predictable naming:
 # http://<service>.<project>.<env><dns_suffix>
+
 API_URL="http://api.${CILO_PROJECT}.${CILO_ENV}${CILO_DNS_SUFFIX}"
 DB_URL="http://db.${CILO_PROJECT}.${CILO_ENV}${CILO_DNS_SUFFIX}"
+REDIS_URL="http://redis.${CILO_PROJECT}.${CILO_ENV}${CILO_DNS_SUFFIX}"
+```
+
+### Checking Environment in Scripts
+
+```bash
+#!/bin/bash
+# agent-script.sh
+
+echo "Running in environment: $CILO_ENV"
+echo "Workspace: $CILO_WORKSPACE"
+echo "API endpoint: $CILO_BASE_URL"
+
+# Make requests to sibling services
+curl "${CILO_BASE_URL}/api/health"
 ```
 
 ---
 
 ## Troubleshooting
 
-**DNS not resolving?**
+**Agents can't connect to services?**
 ```bash
-cilo doctor              # Check system health
-cilo doctor --fix        # Attempt auto-repair
+# Check DNS resolution
+cilo dns status
+
+# Test a specific domain
+dig @127.0.0.1 -p 5354 nginx.agent-1.test
+
+# Auto-fix common issues
+cilo doctor --fix
 ```
 
 **Environment won't start?**
 ```bash
-cilo status <env>        # Check what's running
-cilo logs <env>          # View container logs
-cilo down <env> && cilo up <env>  # Restart
+# Check what's happening
+cilo status agent-1
+cilo logs agent-1
+
+# Restart cleanly
+cilo down agent-1
+cilo up agent-1
 ```
 
-**Need to nuke everything?**
+**Need to clean up?**
 ```bash
-cilo destroy <env> --force    # Remove one environment
-cilo destroy --all --force    # Remove all environments
-sudo cilo teardown            # Full system uninstall
+# Destroy one environment
+cilo destroy agent-1 --force
+
+# Destroy all environments
+cilo destroy --all --force
+
+# Full system reset
+sudo cilo teardown
+```
+
+---
+
+## Common Commands
+
+```bash
+# Create and run
+cilo run <command> <env> [args]       # One-shot: create + start + execute
+cilo create <env> --from <path>       # Create environment
+cilo up <env>                         # Start environment
+cilo down <env>                       # Stop environment
+
+# Information
+cilo list                             # List all environments
+cilo status <env>                     # Show environment status
+cilo logs <env>                       # View container logs
+cilo path <env>                       # Get workspace path
+
+# Maintenance
+cilo doctor                           # Health check
+cilo destroy <env> --force            # Remove environment
 ```
