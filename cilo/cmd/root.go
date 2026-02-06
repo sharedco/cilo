@@ -33,6 +33,9 @@ func Execute() error {
 }
 
 func init() {
+	initCmd.Flags().String("base-subnet", "", "Base subnet for environments (e.g. 10.224.)")
+	initCmd.Flags().Int("dns-port", 0, "Port for the local DNS daemon (default: 5354)")
+
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(configCmd)
@@ -50,6 +53,7 @@ func init() {
 	rootCmd.AddCommand(hostnamesCmd)
 	rootCmd.AddCommand(diffCmd)
 	rootCmd.AddCommand(mergeCmd)
+	rootCmd.AddCommand(networkCmd)
 }
 
 var initCmd = &cobra.Command{
@@ -76,7 +80,17 @@ It will automatically prompt for your password if needed.`,
 
 			// Re-invoke with sudo using absolute path, preserving user's HOME
 			homeDir := os.Getenv("HOME")
-			sudoCmd := exec.Command("sudo", "CILO_USER_HOME="+homeDir, exe, "init")
+			sudoArgs := []string{"CILO_USER_HOME=" + homeDir, exe, "init"}
+			// Pass through flags
+			if baseSubnet, _ := cmd.Flags().GetString("base-subnet"); baseSubnet != "" {
+				sudoArgs = append(sudoArgs, "--base-subnet", baseSubnet)
+			}
+			if dnsPort, _ := cmd.Flags().GetInt("dns-port"); dnsPort != 0 {
+				sudoArgs = append(sudoArgs, "--dns-port", fmt.Sprintf("%d", dnsPort))
+			}
+
+			sudoCmd := exec.Command("sudo", sudoArgs...)
+
 			sudoCmd.Stdin = os.Stdin
 			sudoCmd.Stdout = os.Stdout
 			sudoCmd.Stderr = os.Stderr
@@ -99,6 +113,9 @@ It will automatically prompt for your password if needed.`,
 
 		fmt.Println("Initializing cilo...")
 
+		baseSubnet, _ := cmd.Flags().GetString("base-subnet")
+		dnsPort, _ := cmd.Flags().GetInt("dns-port")
+
 		ciloDir := config.GetCiloHome()
 		dirs := []string{
 			ciloDir,
@@ -111,18 +128,23 @@ It will automatically prompt for your password if needed.`,
 			}
 		}
 
-		if err := state.InitializeState(); err != nil {
+		if err := state.InitializeState(baseSubnet, dnsPort); err != nil {
 			return fmt.Errorf("failed to initialize state: %w", err)
 		}
 
 		fmt.Println("✓ cilo state initialized")
 
-		if err := dns.SetupDNS(); err != nil {
+		st, err := state.LoadState()
+		if err != nil {
+			return err
+		}
+
+		if err := dns.SetupDNS(st); err != nil {
 			return fmt.Errorf("DNS setup failed: %w", err)
 		}
 		fmt.Println("✓ DNS daemon started")
 
-		if err := dns.SetupSystemResolver(); err != nil {
+		if err := dns.SetupSystemResolver(st); err != nil {
 			return fmt.Errorf("system resolver setup failed: %w", err)
 		}
 		fmt.Println("✓ System DNS configured")

@@ -10,6 +10,7 @@ import (
 
 	"github.com/cilo/cilo/pkg/config"
 	"github.com/cilo/cilo/pkg/dns"
+	"github.com/cilo/cilo/pkg/state"
 	"github.com/spf13/cobra"
 )
 
@@ -45,7 +46,8 @@ If you prefer to configure manually, see the commands below.`,
 
 		if err := checkDNSMasqRunning(); err != nil {
 			fmt.Println("⚠ dnsmasq is not running. Starting it...")
-			if err := dns.SetupDNS(); err != nil {
+			st, _ := state.LoadState()
+			if err := dns.SetupDNS(st); err != nil {
 				fmt.Printf("✗ Failed to start dnsmasq: %v\n", err)
 				fmt.Println()
 				printDNSManual(cleanSuffix)

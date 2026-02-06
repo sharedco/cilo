@@ -93,3 +93,50 @@ func CheckSubnetCollision(ctx context.Context, subnet string) (bool, string, err
 func subnetsOverlap(a, b *net.IPNet) bool {
 	return a.Contains(b.IP) || b.Contains(a.IP)
 }
+
+// FindAvailableBaseSubnet finds a base subnet (e.g. 10.x.) that doesn't conflict with any Docker networks
+func FindAvailableBaseSubnet(ctx context.Context, startByte int) (string, error) {
+	networks, err := GetDockerNetworkSubnets(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	for i := startByte; i < 255; i++ {
+		candidate := fmt.Sprintf("10.%d.", i)
+		collision := false
+
+		// Check against all docker networks
+		for _, existingSubnet := range networks {
+			if strings.HasPrefix(existingSubnet, candidate) {
+				collision = true
+				break
+			}
+		}
+
+		if !collision {
+			return candidate, nil
+		}
+	}
+
+	return "", fmt.Errorf("could not find an available 10.x.0.0/16 range")
+}
+
+// CheckGlobalHealth checks if the current base subnet is still healthy
+func CheckGlobalHealth(ctx context.Context, baseSubnet string) error {
+	if baseSubnet == "" {
+		return nil
+	}
+
+	networks, err := GetDockerNetworkSubnets(ctx)
+	if err != nil {
+		return nil // Don't block if docker is down
+	}
+
+	for name, subnet := range networks {
+		if strings.HasPrefix(subnet, baseSubnet) && !strings.HasPrefix(name, "cilo_") {
+			return fmt.Errorf("global base subnet %s conflicts with non-cilo network %s (%s)", baseSubnet, name, subnet)
+		}
+	}
+
+	return nil
+}

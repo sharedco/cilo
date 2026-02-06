@@ -1,0 +1,25 @@
+{
+  "plugin": [
+    // "oh-my-opencode"
+  ],
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "AGENTS.md",
+    "knowledge/canon/agents/commands.md"
+  ],
+  "mcp": {
+    "qmd": {
+      "type": "local",
+      "command": [
+        "qmd",
+        "mcp"
+      ],
+      "enabled": true
+    },
+    "linear": {
+      "type": "remote",
+      "url": "https://mcp.linear.app/sse",
+      "oauth": {}
+    }
+  }
+}

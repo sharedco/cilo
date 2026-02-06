@@ -14,17 +14,17 @@ import (
 )
 
 const (
-	dnsPort     = 5354
-	dnsConfFile = "dnsmasq.conf"
-	dnsPidFile  = "dnsmasq.pid"
-	resolverDir = "/etc/resolver"
+	defaultDNSPort = 5354
+	dnsConfFile    = "dnsmasq.conf"
+	dnsPidFile     = "dnsmasq.pid"
+	resolverDir    = "/etc/resolver"
 )
 
-func SetupDNS() error {
+func SetupDNS(state *models.State) error {
 	dnsDir := getDNSDir()
 
-	// Render base config with empty state
-	config, err := RenderConfig(nil)
+	// Render base config with current state
+	config, err := RenderConfig(state)
 	if err != nil {
 		return fmt.Errorf("failed to render base DNS config: %w", err)
 	}
@@ -37,8 +37,8 @@ func SetupDNS() error {
 	return startDNS()
 }
 
-func SetupSystemResolver() error {
-	return setupResolver()
+func SetupSystemResolver(state *models.State) error {
+	return setupResolver(state)
 }
 
 // UpdateDNSFromState regenerates DNS config from state and reloads dnsmasq
@@ -220,18 +220,18 @@ func reloadDNSRestart() error {
 	return startDNS()
 }
 
-func setupResolver() error {
+func setupResolver(state *models.State) error {
 	// Check OS
 	if _, err := os.Stat("/etc/systemd"); err == nil {
 		// Linux with systemd
-		return setupSystemdResolved()
+		return setupSystemdResolved(state)
 	}
 
 	// macOS or other Unix
-	return setupMacOSResolver()
+	return setupMacOSResolver(state)
 }
 
-func setupSystemdResolved() error {
+func setupSystemdResolved(state *models.State) error {
 	confDir := "/etc/systemd/resolved.conf.d"
 	confFile := filepath.Join(confDir, "cilo.conf")
 
@@ -239,10 +239,15 @@ func setupSystemdResolved() error {
 		return fmt.Errorf("failed to create resolved.conf.d: %w", err)
 	}
 
-	config := `[Resolve]
-DNS=127.0.0.1:5354
+	port := defaultDNSPort
+	if state != nil && state.DNSPort != 0 {
+		port = state.DNSPort
+	}
+
+	config := fmt.Sprintf(`[Resolve]
+DNS=127.0.0.1:%d
 Domains=~test
-`
+`, port)
 
 	if err := os.WriteFile(confFile, []byte(config), 0644); err != nil {
 		return fmt.Errorf("failed to write resolved config: %w", err)
@@ -256,18 +261,26 @@ Domains=~test
 	return nil
 }
 
-func setupMacOSResolver() error {
+func setupMacOSResolver(state *models.State) error {
 	// macOS uses /etc/resolver/
 	if _, err := os.Stat(resolverDir); os.IsNotExist(err) {
 		fmt.Printf("Please create %s directory with:\n", resolverDir)
 		fmt.Printf("  sudo mkdir -p %s\n", resolverDir)
 		fmt.Println("Then add the test resolver:")
-		fmt.Printf("  echo 'nameserver 127.0.0.1\nport 5354' | sudo tee %s/test\n", resolverDir)
+		port := defaultDNSPort
+		if state != nil && state.DNSPort != 0 {
+			port = state.DNSPort
+		}
+		fmt.Printf("  echo 'nameserver 127.0.0.1\nport %d' | sudo tee %s/test\n", port, resolverDir)
 		return fmt.Errorf("resolver directory not found")
 	}
 
 	resolverFile := filepath.Join(resolverDir, "test")
-	content := "nameserver 127.0.0.1\nport 5354\n"
+	port := defaultDNSPort
+	if state != nil && state.DNSPort != 0 {
+		port = state.DNSPort
+	}
+	content := fmt.Sprintf("nameserver 127.0.0.1\nport %d\n", port)
 
 	existing, _ := os.ReadFile(resolverFile)
 	if string(existing) == content {
@@ -275,7 +288,7 @@ func setupMacOSResolver() error {
 	}
 
 	fmt.Println("Please run the following command to configure DNS:")
-	fmt.Printf("  echo 'nameserver 127.0.0.1\nport 5354' | sudo tee %s/test\n", resolverDir)
+	fmt.Printf("  echo 'nameserver 127.0.0.1\nport %d' | sudo tee %s/test\n", port, resolverDir)
 
 	return nil
 }
@@ -285,8 +298,11 @@ func getDNSDir() string {
 }
 
 // GetDNSPort returns the configured DNS port
-func GetDNSPort() int {
-	return dnsPort
+func GetDNSPort(state *models.State) int {
+	if state != nil && state.DNSPort != 0 {
+		return state.DNSPort
+	}
+	return defaultDNSPort
 }
 
 // Cleanup stops dnsmasq and removes DNS configuration

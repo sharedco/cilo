@@ -6,26 +6,28 @@ import (
 
 // State represents global cilo state
 type State struct {
-	Version       int                        `json:"version"`
-	SubnetCounter int                        `json:"subnet_counter"`
-	Hosts         map[string]*Host          `json:"hosts"`
+	Version        int                       `json:"version"`
+	BaseSubnet     string                    `json:"base_subnet,omitempty"`
+	DNSPort        int                       `json:"dns_port,omitempty"`
+	SubnetCounter  int                       `json:"subnet_counter"`
+	Hosts          map[string]*Host          `json:"hosts"`
 	SharedNetworks map[string]*SharedNetwork `json:"shared_networks,omitempty"`
 }
 
 // Host represents a machine or server where environments run
 type Host struct {
-	ID           string                 `json:"id"`
-	Provider     string                 `json:"provider,omitempty"`
-	MeshProvider string                 `json:"mesh_provider,omitempty"`
-	MeshID       string                 `json:"mesh_id,omitempty"`
-	Environments  map[string]*Environment `json:"environments"`
+	ID           string                  `json:"id"`
+	Provider     string                  `json:"provider,omitempty"`
+	MeshProvider string                  `json:"mesh_provider,omitempty"`
+	MeshID       string                  `json:"mesh_id,omitempty"`
+	Environments map[string]*Environment `json:"environments"`
 }
 
 // SharedNetwork represents a network shared across multiple environments
 type SharedNetwork struct {
-	CreatedAt    time.Time   `json:"created_at"`
-	CreatedBy    string      `json:"created_by"` // Environment key that created it
-	ReferencedBy []string    `json:"referenced_by"` // Environment keys using it
+	CreatedAt    time.Time `json:"created_at"`
+	CreatedBy    string    `json:"created_by"`    // Environment key that created it
+	ReferencedBy []string  `json:"referenced_by"` // Environment keys using it
 }
 
 // Environment represents a single isolated workspace
@@ -76,7 +78,7 @@ type ComposeFile struct {
 
 // ComposeNetwork represents a network configuration
 type ComposeNetwork struct {
-	Driver string       `yaml:"driver"`
+	Driver string             `yaml:"driver"`
 	IPAM   *ComposeIPAMConfig `yaml:"ipam,omitempty"`
 }
 

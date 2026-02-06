@@ -43,8 +43,8 @@ func getLocalHost(state *models.State) *models.Host {
 	host, exists := state.Hosts["local"]
 	if !exists {
 		host = &models.Host{
-			ID:          "local",
-			Provider:    "docker",
+			ID:           "local",
+			Provider:     "docker",
 			Environments: make(map[string]*models.Environment),
 		}
 		state.Hosts["local"] = host
@@ -53,27 +53,59 @@ func getLocalHost(state *models.State) *models.Host {
 }
 
 // InitializeState creates initial state file if it doesn't exist
-func InitializeState() error {
+func InitializeState(baseSubnetFlag string, dnsPortFlag int) error {
 	path := getStatePath()
 
 	if _, err := os.Stat(path); err == nil {
-		_, err := LoadState()
-		return err
+		st, err := LoadState()
+		if err != nil {
+			return err
+		}
+		// Update if flags provided
+		modified := false
+		if baseSubnetFlag != "" && st.BaseSubnet != baseSubnetFlag {
+			st.BaseSubnet = baseSubnetFlag
+			modified = true
+		}
+		if dnsPortFlag != 0 && st.DNSPort != dnsPortFlag {
+			st.DNSPort = dnsPortFlag
+			modified = true
+		}
+		if modified {
+			return SaveState(st)
+		}
+		return nil
 	}
 
-	state := &models.State{
-		Version: 2,
+	if baseSubnetFlag == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		var err error
+		baseSubnetFlag, err = network.FindAvailableBaseSubnet(ctx, 224)
+		if err != nil {
+			baseSubnetFlag = "10.224." // Fallback
+		}
+	}
+
+	if dnsPortFlag == 0 {
+		dnsPortFlag = 5354
+	}
+
+	st := &models.State{
+		Version:       2,
+		BaseSubnet:    baseSubnetFlag,
+		DNSPort:       dnsPortFlag,
 		SubnetCounter: 0,
 		Hosts: map[string]*models.Host{
 			"local": {
-				ID:          "local",
-				Provider:    "docker",
+				ID:           "local",
+				Provider:     "docker",
 				Environments: make(map[string]*models.Environment),
 			},
 		},
 		SharedNetworks: make(map[string]*models.SharedNetwork),
 	}
-	return SaveState(state)
+	return SaveState(st)
 }
 
 // LoadState loads state from disk
@@ -180,7 +212,7 @@ func CreateEnvironment(name string, source string, project string) (*models.Envi
 		}
 
 		state.SubnetCounter++
-		subnet := fmt.Sprintf("%s%d.0/24", baseSubnet, state.SubnetCounter)
+		subnet := fmt.Sprintf("%s%d.0/24", state.BaseSubnet, state.SubnetCounter)
 
 		// Check for collisions with existing Docker networks
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
