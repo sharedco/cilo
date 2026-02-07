@@ -4,14 +4,44 @@ Run containers locally or remotely — transparently. Your code doesn't know the
 
 ---
 
-## What This Solves
+## Three Operating Modes
 
-You're developing locally, but some services need to run somewhere else. Maybe Elasticsearch needs more RAM than your laptop has. Maybe you're testing against a staging database. Maybe your team shares a GPU server for ML workloads.
+Cilo environments can run in three modes. Each is independently useful, and they build on each other:
 
-Today this requires VPNs, port forwarding, manual DNS, and config changes per environment. The goal is:
+```
+Full Local (default)     Everything runs on your machine.
+                         What Cilo does today.
+
+Full Remote              Everything runs on a remote host.
+                         Your laptop just handles DNS and your editor.
+                         Simplest remote case — no network bridging needed.
+
+Hybrid                   Some services local, some remote.
+                         The hardest case, but the most powerful.
+```
+
+### Full Remote — Offload Everything
+
+Your laptop is out of RAM. You're running 10 agent environments. You have a beefy staging server sitting idle. Just move the whole thing:
 
 ```bash
-# Run heavy services on a remote host, everything else locally
+# Entire environment runs on staging
+cilo run opencode agent-1 "do the thing" --remote staging
+
+# All DNS still resolves from your laptop:
+# api.agent-1.test → staging
+# db.agent-1.test → staging
+# redis.agent-1.test → staging
+```
+
+This is the simplest remote case because all containers are on the same host — Docker's internal networking handles inter-container communication natively, exactly like it does locally. Cilo just syncs your files, starts compose over SSH, and points your local DNS at the remote host.
+
+### Hybrid — Keep What's Fast, Offload What's Heavy
+
+You want hot reload on your frontend and API, but Elasticsearch needs more RAM than your laptop has:
+
+```bash
+# nginx and api run locally, heavy services run on staging
 cilo run opencode agent-1 "refactor search" \
   --remote-services elasticsearch,postgres \
   --remote-host staging
@@ -21,6 +51,12 @@ cilo run opencode agent-1 "refactor search" \
 # postgres.agent-1.test still resolves
 # nginx and api run locally with hot reload
 ```
+
+This is the harder case — it requires network bridging between local and remote containers. But it's also where the real value is for day-to-day development.
+
+## What This Solves
+
+Today, running containers on a remote host requires VPNs, port forwarding, manual DNS, and config changes per environment. Cilo makes the container's location transparent — your code, your agents, and your tooling don't know or care whether a service is local or remote. The DNS name resolves either way.
 
 ---
 
@@ -82,11 +118,17 @@ Cilo detects available transport and uses the best option. SSH is always the fal
 
 Each phase is independently useful. You can stop at any phase and have a working feature.
 
-### Phase 1: Remote Execution via SSH
+### Phase 1: Full Remote Environments via SSH
 
-**Goal:** Run `docker compose up` on a remote machine instead of locally.
+**Goal:** Run entire environments on a remote machine. This is the full-remote mode — the simplest and most immediately useful remote capability.
 
-This is the foundation. Cilo already copies your project into a workspace directory. Instead of copying to `~/.cilo/envs/...` locally, it copies to the same path on the remote host via rsync, then runs compose over SSH.
+**Why this first:** Full-remote doesn't require any network bridging between local and remote containers. All containers are on the same remote host, so Docker's internal networking handles inter-container communication natively. Cilo only needs to sync files, run compose over SSH, and point local DNS at the remote host.
+
+**Use cases:**
+- Your laptop can't handle 10 parallel agent environments — offload to a server
+- You need GPU access for ML workloads
+- CI/CD on remote runners
+- Your team shares a beefy staging machine
 
 ```bash
 # Register a remote host (one-time)
@@ -94,6 +136,12 @@ cilo remote add staging --host staging.example.com --ssh-key ~/.ssh/id_rsa
 
 # Run an entire environment remotely
 cilo run opencode agent-1 "do the thing" --remote staging
+
+# Run 10 agents on the remote host — your laptop barely notices
+for i in $(seq 1 10); do
+  cilo run opencode "agent-$i" "task $i" --remote staging &
+done
+wait
 ```
 
 **What happens:**
