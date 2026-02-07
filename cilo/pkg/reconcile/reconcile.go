@@ -6,9 +6,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/cilo/cilo/pkg/models"
-	"github.com/cilo/cilo/pkg/runtime"
-	"github.com/cilo/cilo/pkg/runtime/docker"
+	"github.com/sharedco/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/runtime"
+	"github.com/sharedco/cilo/pkg/runtime/docker"
 )
 
 // Result contains reconciliation findings

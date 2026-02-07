@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cilo/cilo/pkg/config"
-	"github.com/cilo/cilo/pkg/models"
-	"github.com/cilo/cilo/pkg/network"
+	"github.com/sharedco/cilo/pkg/config"
+	"github.com/sharedco/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/network"
 )
 
 const baseSubnet = "10.224."

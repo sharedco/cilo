@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cilo/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/models"
 	"gopkg.in/yaml.v3"
 )
 

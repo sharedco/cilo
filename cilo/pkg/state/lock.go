@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/cilo/cilo/pkg/models"
 	"github.com/gofrs/flock"
+	"github.com/sharedco/cilo/pkg/models"
 )
 
 const lockTimeout = 30 * time.Second

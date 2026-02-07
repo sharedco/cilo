@@ -6,9 +6,9 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/cilo/cilo/pkg/dns"
-	"github.com/cilo/cilo/pkg/reconcile"
-	"github.com/cilo/cilo/pkg/state"
+	"github.com/sharedco/cilo/pkg/dns"
+	"github.com/sharedco/cilo/pkg/reconcile"
+	"github.com/sharedco/cilo/pkg/state"
 	"github.com/spf13/cobra"
 )
 

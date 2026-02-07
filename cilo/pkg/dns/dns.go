@@ -9,8 +9,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/cilo/cilo/pkg/config"
-	"github.com/cilo/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/config"
+	"github.com/sharedco/cilo/pkg/models"
 )
 
 const (

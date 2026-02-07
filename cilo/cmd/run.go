@@ -7,10 +7,10 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/cilo/cilo/pkg/compose"
-	"github.com/cilo/cilo/pkg/config"
-	"github.com/cilo/cilo/pkg/models"
-	"github.com/cilo/cilo/pkg/state"
+	"github.com/sharedco/cilo/pkg/compose"
+	"github.com/sharedco/cilo/pkg/config"
+	"github.com/sharedco/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/state"
 	"github.com/spf13/cobra"
 )
 

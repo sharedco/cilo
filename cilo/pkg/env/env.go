@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cilo/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/models"
 )
 
 type RenderContext struct {

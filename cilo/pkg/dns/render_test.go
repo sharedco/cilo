@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cilo/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/models"
 )
 
 func TestRenderConfig_CustomSuffix(t *testing.T) {

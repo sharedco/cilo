@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/cilo/cilo/pkg/config"
-	"github.com/cilo/cilo/pkg/git"
-	"github.com/cilo/cilo/pkg/state"
+	"github.com/sharedco/cilo/pkg/config"
+	"github.com/sharedco/cilo/pkg/git"
+	"github.com/sharedco/cilo/pkg/state"
 	"github.com/spf13/cobra"
 )
 

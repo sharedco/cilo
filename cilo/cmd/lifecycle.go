@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cilo/cilo/pkg/compose"
-	"github.com/cilo/cilo/pkg/dns"
-	envpkg "github.com/cilo/cilo/pkg/env"
-	"github.com/cilo/cilo/pkg/filesystem"
-	"github.com/cilo/cilo/pkg/models"
-	"github.com/cilo/cilo/pkg/runtime"
-	"github.com/cilo/cilo/pkg/runtime/docker"
-	"github.com/cilo/cilo/pkg/state"
+	"github.com/sharedco/cilo/pkg/compose"
+	"github.com/sharedco/cilo/pkg/dns"
+	envpkg "github.com/sharedco/cilo/pkg/env"
+	"github.com/sharedco/cilo/pkg/filesystem"
+	"github.com/sharedco/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/runtime"
+	"github.com/sharedco/cilo/pkg/runtime/docker"
+	"github.com/sharedco/cilo/pkg/state"
 	"github.com/spf13/cobra"
 )
 

@@ -2,7 +2,7 @@ package main
 
 import (
 	"os"
-	"github.com/cilo/cilo/cmd"
+	"github.com/sharedco/cilo/cmd"
 )
 
 func main() {

@@ -7,9 +7,9 @@ import (
 	"os/user"
 	"strconv"
 
-	"github.com/cilo/cilo/pkg/config"
-	"github.com/cilo/cilo/pkg/dns"
-	"github.com/cilo/cilo/pkg/state"
+	"github.com/sharedco/cilo/pkg/config"
+	"github.com/sharedco/cilo/pkg/dns"
+	"github.com/sharedco/cilo/pkg/state"
 	"github.com/spf13/cobra"
 )
 

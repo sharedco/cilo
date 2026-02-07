@@ -9,11 +9,11 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/cilo/cilo/pkg/config"
-	"github.com/cilo/cilo/pkg/models"
-	"github.com/cilo/cilo/pkg/runtime"
-	"github.com/cilo/cilo/pkg/runtime/docker"
-	"github.com/cilo/cilo/pkg/state"
+	"github.com/sharedco/cilo/pkg/config"
+	"github.com/sharedco/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/runtime"
+	"github.com/sharedco/cilo/pkg/runtime/docker"
+	"github.com/sharedco/cilo/pkg/state"
 	"github.com/spf13/cobra"
 )
 

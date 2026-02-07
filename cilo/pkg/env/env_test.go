@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cilo/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/models"
 )
 
 func TestApplyConfig_RenderTokensAndReplace(t *testing.T) {

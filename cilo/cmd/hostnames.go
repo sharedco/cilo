@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/cilo/cilo/pkg/dns"
-	"github.com/cilo/cilo/pkg/models"
-	"github.com/cilo/cilo/pkg/state"
+	"github.com/sharedco/cilo/pkg/dns"
+	"github.com/sharedco/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/state"
 	"github.com/spf13/cobra"
 )
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/cilo/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/models"
 	"github.com/spf13/cobra"
 )
 

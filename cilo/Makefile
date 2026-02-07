@@ -11,9 +11,9 @@ GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Go build flags with version info
-LDFLAGS := -ldflags "-X github.com/cilo/cilo/cmd.version=$(VERSION) \
-	-X github.com/cilo/cilo/cmd.commit=$(GIT_COMMIT) \
-	-X github.com/cilo/cilo/cmd.date=$(BUILD_DATE)"
+LDFLAGS := -ldflags "-X github.com/sharedco/cilo/cmd.version=$(VERSION) \
+	-X github.com/sharedco/cilo/cmd.commit=$(GIT_COMMIT) \
+	-X github.com/sharedco/cilo/cmd.date=$(BUILD_DATE)"
 
 .PHONY: all build install clean version test bump-patch bump-minor bump-major
 

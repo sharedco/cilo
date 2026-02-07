@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cilo/cilo/pkg/models"
+	"github.com/sharedco/cilo/pkg/models"
 )
 
 // RenderConfig generates a complete dnsmasq configuration from current state.
