@@ -14,6 +14,11 @@ import (
 
 // Transform creates a cilo override compose file for the given base compose files.
 func Transform(env *models.Environment, baseFiles []string, overridePath, dnsSuffix string) error {
+	return TransformWithShared(env, baseFiles, overridePath, dnsSuffix, nil)
+}
+
+// TransformWithShared creates a cilo override compose file, skipping shared services
+func TransformWithShared(env *models.Environment, baseFiles []string, overridePath, dnsSuffix string, sharedServices []string) error {
 	services, err := LoadServices(baseFiles)
 	if err != nil {
 		return err
@@ -33,9 +38,12 @@ func Transform(env *models.Environment, baseFiles []string, overridePath, dnsSuf
 
 	// Get the first IP in the subnet
 	baseIP := ipnet.IP
-	// Increment to skip network address and start from .2
-	ip := incrementIP(baseIP)
-	ip = incrementIP(ip) // Start from .2
+	// Skip network address (.1) and reserve .2-.9 for shared services
+	// Start isolated services from .10
+	ip := baseIP
+	for i := 0; i < 10; i++ {
+		ip = incrementIP(ip)
+	}
 
 	networkName := "default"
 
@@ -45,6 +53,11 @@ func Transform(env *models.Environment, baseFiles []string, overridePath, dnsSuf
 	servicesWithHostnames := []string{}
 
 	for name, service := range services {
+		// Skip shared services in ingress detection
+		if contains(sharedServices, name) {
+			continue
+		}
+
 		if service.Labels != nil {
 			if _, ok := service.Labels["cilo.hostnames"]; ok {
 				servicesWithHostnames = append(servicesWithHostnames, name)
@@ -65,16 +78,29 @@ func Transform(env *models.Environment, baseFiles []string, overridePath, dnsSuf
 		"services": map[string]interface{}{},
 		"networks": map[string]interface{}{
 			networkName: map[string]interface{}{
-				"driver": "bridge",
-				"ipam": map[string]interface{}{
-					"config": []map[string]string{{"subnet": env.Subnet}},
-				},
+				"name":     fmt.Sprintf("cilo_%s", env.Name),
+				"external": true,
 			},
 		},
 	}
 
+	// Initialize services map if nil
+	if env.Services == nil {
+		env.Services = make(map[string]*models.Service)
+	}
+
 	serviceOverrides := override["services"].(map[string]interface{})
 	for _, name := range SortedServiceNames(services) {
+		// For shared services, mark them as disabled so compose doesn't start them
+		if contains(sharedServices, name) {
+			serviceOverrides[name] = map[string]interface{}{
+				"deploy": map[string]interface{}{
+					"replicas": 0,
+				},
+			}
+			continue
+		}
+
 		service := services[name]
 		containerName := fmt.Sprintf("cilo_%s_%s", env.Name, name)
 		serviceOverrides[name] = map[string]interface{}{
@@ -127,6 +153,16 @@ func Transform(env *models.Environment, baseFiles []string, overridePath, dnsSuf
 	}
 
 	return nil
+}
+
+// contains checks if a slice contains a value
+func contains(slice []string, value string) bool {
+	for _, item := range slice {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }
 
 // CreateMinimal creates a minimal docker-compose.yml for scratch environments

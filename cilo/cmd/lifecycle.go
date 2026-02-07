@@ -15,6 +15,7 @@ import (
 	"github.com/sharedco/cilo/pkg/models"
 	"github.com/sharedco/cilo/pkg/runtime"
 	"github.com/sharedco/cilo/pkg/runtime/docker"
+	"github.com/sharedco/cilo/pkg/share"
 	"github.com/sharedco/cilo/pkg/state"
 	"github.com/spf13/cobra"
 )
@@ -171,6 +172,8 @@ var upCmd = &cobra.Command{
 
 		build, _ := cmd.Flags().GetBool("build")
 		recreate, _ := cmd.Flags().GetBool("recreate")
+		sharedFlag, _ := cmd.Flags().GetStringSlice("shared")
+		isolateFlag, _ := cmd.Flags().GetStringSlice("isolate")
 
 		env, err := state.GetEnvironment(project, name)
 		if err != nil {
@@ -209,15 +212,88 @@ var upCmd = &cobra.Command{
 			return fmt.Errorf("invalid compose file: %w", err)
 		}
 
+		// Determine which services should be shared
+		// 1. Start with services labeled cilo.share: "true"
+		sharedServices, err := compose.GetServicesWithLabel(composeFiles, "cilo.share", "true")
+		if err != nil {
+			return fmt.Errorf("failed to get shared services: %w", err)
+		}
+
+		// 2. Add from --shared flag
+		for _, svc := range sharedFlag {
+			svc = strings.TrimSpace(svc)
+			if svc != "" && !contains(sharedServices, svc) {
+				sharedServices = append(sharedServices, svc)
+			}
+		}
+
+		// 3. Remove from --isolate flag
+		sharedServices = filterOut(sharedServices, isolateFlag)
+
+		// Create network first
+		ctx := context.Background()
+		provider := docker.NewProvider()
+		if err := provider.CreateNetwork(ctx, env); err != nil {
+			return fmt.Errorf("failed to create network: %w", err)
+		}
+
+		// Handle shared services
+		if len(sharedServices) > 0 {
+			fmt.Printf("Managing shared services: %s\n", strings.Join(sharedServices, ", "))
+			shareMgr := share.NewManager(provider, ctx)
+
+			for _, svc := range sharedServices {
+				// Ensure shared service is running
+				containerName, ip, err := shareMgr.EnsureSharedService(svc, project, composeFiles)
+				if err != nil {
+					return fmt.Errorf("failed to ensure shared service %s: %w", svc, err)
+				}
+
+				// Register in state
+				if err := shareMgr.RegisterSharedService(svc, project, containerName, ip, composeFiles); err != nil {
+					return fmt.Errorf("failed to register shared service %s: %w", svc, err)
+				}
+
+				// Connect to environment network
+				if err := shareMgr.ConnectSharedServiceToEnvironment(svc, project, name); err != nil {
+					return fmt.Errorf("failed to connect shared service %s: %w", svc, err)
+				}
+
+				// Get IP for this specific network
+				ip, err = shareMgr.GetSharedServiceIP(svc, project, name)
+				if err != nil {
+					return fmt.Errorf("failed to get shared service IP: %w", err)
+				}
+
+				// Add reference
+				if err := shareMgr.AddEnvironmentReference(svc, project, project, name); err != nil {
+					return fmt.Errorf("failed to add environment reference: %w", err)
+				}
+
+				// Add to environment's service list
+				if env.Services == nil {
+					env.Services = make(map[string]*models.Service)
+				}
+				env.Services[svc] = &models.Service{
+					Name:      svc,
+					IP:        ip,
+					Container: containerName,
+				}
+
+				fmt.Printf("  ✓ Shared service %s connected (IP: %s)\n", svc, ip)
+			}
+
+			// Store shared services list in environment
+			env.UsesSharedServices = sharedServices
+		}
+
 		fmt.Printf("Generating cilo override...\n")
 		overridePath := filepath.Join(workspace, ".cilo", "override.yml")
-		if err := compose.Transform(env, composeFiles, overridePath, dnsSuffix); err != nil {
+		if err := compose.TransformWithShared(env, composeFiles, overridePath, dnsSuffix, sharedServices); err != nil {
 			return fmt.Errorf("failed to generate override file: %w", err)
 		}
 
 		fmt.Printf("Starting containers...\n")
-		provider := docker.NewProvider()
-		ctx := context.Background()
 		if err := provider.Up(ctx, env, runtime.UpOptions{
 			Build:    build,
 			Recreate: recreate,
@@ -256,9 +332,13 @@ var upCmd = &cobra.Command{
 			}
 		}
 		if len(otherServices) > 0 {
-			fmt.Printf("\n📦 Internal Services:\n")
+			fmt.Printf("\n📦 Services:\n")
 			for _, service := range otherServices {
-				fmt.Printf("  %s: %s\n", service.Name, service.IP)
+				serviceType := "isolated"
+				if contains(env.UsesSharedServices, service.Name) {
+					serviceType = "shared"
+				}
+				fmt.Printf("  %s: %s (%s)\n", service.Name, service.IP, serviceType)
 			}
 		}
 
@@ -281,8 +361,30 @@ var downCmd = &cobra.Command{
 			return err
 		}
 
-		provider := docker.NewProvider()
 		ctx := context.Background()
+		provider := docker.NewProvider()
+
+		// Disconnect shared services before stopping environment
+		if len(env.UsesSharedServices) > 0 {
+			fmt.Printf("Disconnecting shared services...\n")
+			shareMgr := share.NewManager(provider, ctx)
+
+			for _, svc := range env.UsesSharedServices {
+				if err := shareMgr.DisconnectSharedServiceFromEnvironment(svc, project, name); err != nil {
+					fmt.Printf("Warning: failed to disconnect shared service %s: %v\n", svc, err)
+				}
+
+				if err := shareMgr.RemoveEnvironmentReference(svc, project, project, name); err != nil {
+					fmt.Printf("Warning: failed to remove environment reference: %v\n", err)
+				}
+
+				// Check if service should be stopped (grace period handled internally)
+				if err := shareMgr.StopSharedServiceIfUnused(svc, project); err != nil {
+					fmt.Printf("Warning: failed to stop shared service: %v\n", err)
+				}
+			}
+		}
+
 		if err := provider.Down(ctx, env); err != nil {
 			return err
 		}
@@ -359,6 +461,8 @@ func init() {
 	upCmd.Flags().Bool("build", false, "Build images before starting")
 	upCmd.Flags().Bool("recreate", false, "Force recreate containers")
 	upCmd.Flags().String("project", "", "Project name (defaults to configured project)")
+	upCmd.Flags().StringSlice("shared", []string{}, "Services to share across environments")
+	upCmd.Flags().StringSlice("isolate", []string{}, "Services to isolate (override labels)")
 
 	downCmd.Flags().String("project", "", "Project name (defaults to configured project)")
 
@@ -428,4 +532,22 @@ func shouldSkipDotDir(name string, opts CopyOptions) bool {
 	}
 
 	return true
+}
+
+// filterOut removes items from slice that are in the filter list
+func filterOut(slice []string, filter []string) []string {
+	result := []string{}
+	for _, item := range slice {
+		shouldFilter := false
+		for _, f := range filter {
+			if strings.TrimSpace(f) == item {
+				shouldFilter = true
+				break
+			}
+		}
+		if !shouldFilter {
+			result = append(result, item)
+		}
+	}
+	return result
 }

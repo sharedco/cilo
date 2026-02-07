@@ -8,6 +8,8 @@ import (
 
 	"github.com/sharedco/cilo/pkg/dns"
 	"github.com/sharedco/cilo/pkg/reconcile"
+	"github.com/sharedco/cilo/pkg/runtime/docker"
+	"github.com/sharedco/cilo/pkg/share"
 	"github.com/sharedco/cilo/pkg/state"
 	"github.com/spf13/cobra"
 )
@@ -93,9 +95,64 @@ Use --fix to automatically repair issues.`,
 			fmt.Println("  ✅ No orphaned resources")
 		}
 
+		// Check shared services
+		fmt.Println("\n🔎 Checking shared services...")
+		provider := docker.NewProvider()
+		sharedIssues, err := share.CheckSharedServices(st, provider, ctx)
+		if err != nil {
+			fmt.Printf("  ⚠️  Could not check shared services: %v\n", err)
+		} else if len(sharedIssues) > 0 {
+			fmt.Printf("  Found %d issues:\n", len(sharedIssues))
+			for _, issue := range sharedIssues {
+				var emoji string
+				switch issue.Type {
+				case "orphaned":
+					emoji = "🗑️ "
+				case "missing":
+					emoji = "❓"
+				case "stale_grace":
+					emoji = "⏰"
+				case "stopped":
+					emoji = "⏸️ "
+				default:
+					emoji = "⚠️ "
+				}
+				fmt.Printf("    %s %s: %s\n", emoji, issue.Type, issue.Detail)
+			}
+		} else {
+			fmt.Println("  ✅ No shared service issues")
+		}
+
 		// Fix if requested
 		if fix {
 			fmt.Println("\n🔧 Applying fixes...")
+
+			// Fix shared services
+			if len(sharedIssues) > 0 {
+				fmt.Print("  Fixing orphaned shared services... ")
+				fixed, err := share.FixOrphanedServices(st, provider, ctx)
+				if err != nil {
+					fmt.Printf("❌ %v\n", err)
+				} else {
+					fmt.Printf("✅ (fixed %d)\n", fixed)
+				}
+
+				fmt.Print("  Fixing stale grace periods... ")
+				fixed, err = share.FixStaleGracePeriods(st, provider, ctx)
+				if err != nil {
+					fmt.Printf("❌ %v\n", err)
+				} else {
+					fmt.Printf("✅ (fixed %d)\n", fixed)
+				}
+
+				fmt.Print("  Cleaning up missing service entries... ")
+				fixed, err = share.FixMissingServices(st, provider, ctx)
+				if err != nil {
+					fmt.Printf("❌ %v\n", err)
+				} else {
+					fmt.Printf("✅ (fixed %d)\n", fixed)
+				}
+			}
 
 			// Save reconciled state
 			fmt.Print("  Saving state... ")
@@ -112,7 +169,7 @@ Use --fix to automatically repair issues.`,
 			} else {
 				fmt.Println("✅")
 			}
-		} else if len(result.Errors) > 0 || len(orphans) > 0 {
+		} else if len(result.Errors) > 0 || len(orphans) > 0 || len(sharedIssues) > 0 {
 			fmt.Println("\n💡 Run 'cilo doctor --fix' to repair issues")
 		}
 

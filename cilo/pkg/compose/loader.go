@@ -129,3 +129,23 @@ func SortedServiceNames(services map[string]*ServiceMeta) []string {
 	sort.Strings(names)
 	return names
 }
+
+// GetServicesWithLabel returns service names that have a specific label with the given value
+func GetServicesWithLabel(composeFiles []string, labelKey string, labelValue string) ([]string, error) {
+	services, err := LoadServices(composeFiles)
+	if err != nil {
+		return nil, err
+	}
+
+	var result []string
+	for name, meta := range services {
+		if meta.Labels != nil {
+			if value, ok := meta.Labels[labelKey]; ok && value == labelValue {
+				result = append(result, name)
+			}
+		}
+	}
+
+	sort.Strings(result)
+	return result, nil
+}

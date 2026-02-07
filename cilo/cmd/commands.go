@@ -115,12 +115,16 @@ var statusCmd = &cobra.Command{
 
 		fmt.Printf("\nServices:\n")
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintf(w, "NAME\tIP\tURL\t\n")
-		fmt.Fprintf(w, "----\t--\t---\t\n")
+		fmt.Fprintf(w, "NAME\tTYPE\tIP\tURL\t\n")
+		fmt.Fprintf(w, "----\t----\t--\t---\t\n")
 
 		for _, service := range env.Services {
+			serviceType := "isolated"
+			if contains(env.UsesSharedServices, service.Name) {
+				serviceType = "shared"
+			}
 			url := fmt.Sprintf("http://%s.%s%s", service.Name, env.Name, dnsSuffix)
-			fmt.Fprintf(w, "%s\t%s\t%s\t\n", service.Name, service.IP, url)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t\n", service.Name, serviceType, service.IP, url)
 		}
 		w.Flush()
 		fmt.Printf("\nWorkspace: %s\n", workspace)
@@ -326,4 +330,14 @@ func listQuiet(envs []*models.Environment, all bool) error {
 		fmt.Println(env.Name)
 	}
 	return nil
+}
+
+// contains checks if a string slice contains a value
+func contains(slice []string, value string) bool {
+	for _, item := range slice {
+		if item == value {
+			return true
+		}
+	}
+	return false
 }

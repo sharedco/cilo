@@ -92,10 +92,10 @@ func InitializeState(baseSubnetFlag string, dnsPortFlag int) error {
 	}
 
 	st := &models.State{
-		Version:       2,
-		BaseSubnet:    baseSubnetFlag,
-		DNSPort:       dnsPortFlag,
-		SubnetCounter: 0,
+		Version:        2,
+		BaseSubnet:     baseSubnetFlag,
+		DNSPort:        dnsPortFlag,
+		SubnetCounter:  0,
 		Hosts: map[string]*models.Host{
 			"local": {
 				ID:           "local",
@@ -104,6 +104,7 @@ func InitializeState(baseSubnetFlag string, dnsPortFlag int) error {
 			},
 		},
 		SharedNetworks: make(map[string]*models.SharedNetwork),
+		SharedServices: make(map[string]*models.SharedService),
 	}
 	return SaveState(st)
 }
@@ -130,6 +131,9 @@ func LoadState() (*models.State, error) {
 	}
 	if state.SharedNetworks == nil {
 		state.SharedNetworks = make(map[string]*models.SharedNetwork)
+	}
+	if state.SharedServices == nil {
+		state.SharedServices = make(map[string]*models.SharedService)
 	}
 
 	return &state, nil

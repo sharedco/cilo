@@ -12,6 +12,7 @@ type State struct {
 	SubnetCounter  int                       `json:"subnet_counter"`
 	Hosts          map[string]*Host          `json:"hosts"`
 	SharedNetworks map[string]*SharedNetwork `json:"shared_networks,omitempty"`
+	SharedServices map[string]*SharedService `json:"shared_services,omitempty"`
 }
 
 // Host represents a machine or server where environments run
@@ -30,17 +31,31 @@ type SharedNetwork struct {
 	ReferencedBy []string  `json:"referenced_by"` // Environment keys using it
 }
 
+// SharedService represents a service shared across multiple environments
+type SharedService struct {
+	Name              string    `json:"name"`               // Service name (e.g., "elasticsearch")
+	Container         string    `json:"container"`          // Docker container name (e.g., "cilo_shared_elasticsearch")
+	IP                string    `json:"ip"`                 // Primary IP address
+	Project           string    `json:"project"`            // Project that owns this shared service
+	Image             string    `json:"image"`              // Image with tag for conflict detection
+	ConfigHash        string    `json:"config_hash"`        // Hash of service definition for conflict detection
+	CreatedAt         time.Time `json:"created_at"`
+	UsedBy            []string  `json:"used_by"`            // Environment keys: "project/env"
+	DisconnectTimeout time.Time `json:"disconnect_timeout"` // Grace period timestamp
+}
+
 // Environment represents a single isolated workspace
 type Environment struct {
-	Name           string              `json:"name"`
-	Project        string              `json:"project,omitempty"`
-	CreatedAt      time.Time           `json:"created_at"`
-	Subnet         string              `json:"subnet"`
-	DNSSuffix      string              `json:"dns_suffix,omitempty"`
-	Status         string              `json:"status"`
-	Source         string              `json:"source,omitempty"`
-	Services       map[string]*Service `json:"services"`
-	SharedNetworks []string            `json:"shared_networks,omitempty"` // Names of shared networks
+	Name               string              `json:"name"`
+	Project            string              `json:"project,omitempty"`
+	CreatedAt          time.Time           `json:"created_at"`
+	Subnet             string              `json:"subnet"`
+	DNSSuffix          string              `json:"dns_suffix,omitempty"`
+	Status             string              `json:"status"`
+	Source             string              `json:"source,omitempty"`
+	Services           map[string]*Service `json:"services"`
+	SharedNetworks     []string            `json:"shared_networks,omitempty"`      // Names of shared networks
+	UsesSharedServices []string            `json:"uses_shared_services,omitempty"` // Names of shared services this env consumes
 }
 
 // Service represents a service within an environment

@@ -309,6 +309,135 @@ func (p *Provider) Compose(ctx context.Context, project, envName string, opts ru
 	return cmd.Run()
 }
 
+// ConnectContainerToNetwork attaches a container to a network with an alias
+// The alias is critical for inter-container DNS resolution
+func (p *Provider) ConnectContainerToNetwork(ctx context.Context, containerName, networkName, alias string) error {
+	args := []string{"network", "connect"}
+	if alias != "" {
+		args = append(args, "--alias", alias)
+	}
+	args = append(args, networkName, containerName)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to connect container %s to network %s: %w", containerName, networkName, err)
+	}
+
+	return nil
+}
+
+// DisconnectContainerFromNetwork removes a container from a network
+func (p *Provider) DisconnectContainerFromNetwork(ctx context.Context, containerName, networkName string) error {
+	cmd := exec.CommandContext(ctx, "docker", "network", "disconnect", networkName, containerName)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to disconnect container %s from network %s: %w", containerName, networkName, err)
+	}
+
+	return nil
+}
+
+// GetContainerIPForNetwork returns the IP address of a container on a specific network
+func (p *Provider) GetContainerIPForNetwork(ctx context.Context, containerName, networkName string) (string, error) {
+	// Get the network ID first
+	networkIDCmd := exec.CommandContext(ctx, "docker", "network", "inspect", "-f", "{{.Id}}", networkName)
+	networkIDOutput, err := networkIDCmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get network ID for %s: %w", networkName, err)
+	}
+	networkID := strings.TrimSpace(string(networkIDOutput))
+
+	// Get the IP for this specific network
+	template := fmt.Sprintf("{{range .NetworkSettings.Networks}}{{if eq .NetworkID \"%s\"}}{{.IPAddress}}{{end}}{{end}}", networkID)
+	cmd := exec.CommandContext(ctx, "docker", "inspect", "-f", template, containerName)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get IP for container %s on network %s: %w", containerName, networkName, err)
+	}
+
+	ip := strings.TrimSpace(string(output))
+	if ip == "" {
+		return "", fmt.Errorf("container %s has no IP address on network %s", containerName, networkName)
+	}
+
+	return ip, nil
+}
+
+// ListContainersWithLabel returns container names that have the specified label
+func (p *Provider) ListContainersWithLabel(ctx context.Context, labelKey, labelValue string) ([]string, error) {
+	label := fmt.Sprintf("%s=%s", labelKey, labelValue)
+	cmd := exec.CommandContext(ctx, "docker", "ps", "-a", "--filter", fmt.Sprintf("label=%s", label), "--format", "{{.Names}}")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers with label %s: %w", label, err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	var containers []string
+	for _, line := range lines {
+		if line != "" {
+			containers = append(containers, line)
+		}
+	}
+
+	return containers, nil
+}
+
+// ContainerExists checks if a container with the given name exists
+func (p *Provider) ContainerExists(ctx context.Context, containerName string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "docker", "inspect", containerName)
+	err := cmd.Run()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// GetContainerStatus returns the status of a container (running, stopped, etc.)
+func (p *Provider) GetContainerStatus(ctx context.Context, containerName string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.State.Status}}", containerName)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to get status for container %s: %w", containerName, err)
+	}
+
+	return strings.TrimSpace(string(output)), nil
+}
+
+// StopContainer stops a running container
+func (p *Provider) StopContainer(ctx context.Context, containerName string) error {
+	cmd := exec.CommandContext(ctx, "docker", "stop", containerName)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to stop container %s: %w", containerName, err)
+	}
+
+	return nil
+}
+
+// RemoveContainer removes a container
+func (p *Provider) RemoveContainer(ctx context.Context, containerName string) error {
+	cmd := exec.CommandContext(ctx, "docker", "rm", containerName)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to remove container %s: %w", containerName, err)
+	}
+
+	return nil
+}
+
 func getNetworkName(envName string) string {
 	return fmt.Sprintf("cilo_%s", envName)
 }
