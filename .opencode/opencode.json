@@ -1,6 +1,6 @@
 {
   "plugin": [
-    // "oh-my-opencode"
+    "oh-my-opencode"
   ],
   "$schema": "https://opencode.ai/config.json",
   "instructions": [
