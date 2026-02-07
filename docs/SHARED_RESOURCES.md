@@ -320,3 +320,177 @@ Grace period implementation detail: Should the grace period timer be:
 1. In-memory only (simple, lost on Cilo restart, but probably fine)
 2. Persisted in state (survives restart, more complex)
 My leaning is option 1 for v1 — if Cilo restarts during the grace period, the shared container just gets cleaned up on next cilo doctor run or when someone notices. The 60s window is short enough that restart during it is unlikely. What's your take, objectivley review from first principles no bias?
+
+Excellent feedback. Let me incorporate all of this into a refined plan.
+Final Implementation Plan: Shared Services
+Critical Technical Discovery
+Network aliases are mandatory. When connecting a shared container to an environment network, we must attach an alias matching the original service name:
+docker network connect --alias elasticsearch cilo-agent-1-network cilo_shared_elasticsearch
+Without this, containers inside the environment can't resolve elasticsearch — they don't use the host's dnsmasq. This is make-or-break for real-world usage.
+Updated Phase Details
+Phase 0: SPIKE — Validate Docker Networking
+Timebox: 2-3 hours
+Test script must verify:
+- [ ] docker network connect --alias <service> <network> <container> works
+- [ ] Container A in env network can reach shared container via service name
+- [ ] Both Linux and macOS behaviors
+- [ ] Clean disconnection/removal
+---
+Phase 1: Minimal Runtime Implementation
+Update: cilo/pkg/runtime/docker/provider.go
+// Connect with alias support - CRITICAL for inter-container DNS
+func (p *Provider) ConnectContainerToNetwork(containerName, networkName, alias string) error
+func (p *Provider) DisconnectContainerFromNetwork(containerName, networkName) error
+func (p *Provider) GetContainerIP(containerName) (string, error)
+func (p *Provider) ListContainersWithLabel(labelKey, labelValue) ([]string, error)
+New: cilo/pkg/share/manager.go
+type Manager struct {
+    provider runtime.Provider
+}
+func (m *Manager) EnsureSharedService(serviceName string, composeFiles []string) (containerName, ip string, err error)
+func (m *Manager) ConnectSharedServiceToEnvironment(serviceName, envName string) error // Uses --alias
+func (m *Manager) DisconnectSharedServiceFromEnvironment(serviceName, envName string) error
+func (m *Manager) GetSharedServiceIP(serviceName string) (string, error)
+func (m *Manager) StopSharedServiceIfUnused(serviceName string) error // With 60s grace period
+---
+Phase 2: Data Model
+Update: cilo/pkg/models/models.go
+type SharedService struct {
+    Name       string    `json:"name"`
+    Container  string    `json:"container"`
+    IP         string    `json:"ip"`
+    Project    string    `json:"project"`
+    Image      string    `json:"image"`
+    VolumeHash string    `json:"volume_hash"`    // Hash of volume mounts
+    CreatedAt  time.Time `json:"created_at"`
+    UsedBy     []string  `json:"used_by"`        // "project/env" keys
+    DisconnectTimeout time.Time `json:"disconnect_timeout,omitempty"` // Grace period
+}
+type Environment struct {
+    // ... existing fields ...
+    UsesSharedServices []string `json:"uses_shared_services,omitempty"`
+}
+Config Hash Strategy:
+- Include: image (with tag), volume mounts, ports, command, entrypoint
+- Exclude: environment variables (shared service runs with one config regardless)
+---
+Phase 3: CLI Integration
+Update: cilo/cmd/run.go
+runCmd.Flags().String("share", "", "Share comma-separated services")
+runCmd.Flags().String("isolate", "", "Isolate comma-separated services (override labels)")
+Merge logic:
+// 1. Start with services labeled cilo.share: "true"
+shared := compose.GetServicesWithLabel(composeFiles, "cilo.share")
+// 2. Add from --share flag
+shared = append(shared, parseFlag(shareFlag)...)
+// 3. Remove from --isolate flag  
+shared = filterOut(shared, parseFlag(isolateFlag))
+Update: cilo/cmd/lifecycle.go
+In up:
+// After starting isolated services
+shareMgr := share.NewManager(docker.NewProvider())
+for _, svc := range sharedServices {
+    container, ip, err := shareMgr.EnsureSharedService(svc, composeFiles)
+    if err != nil {
+        if IsVersionConflict(err) {
+            fmt.Printf("⚠️  Warning: %s definition differs from shared instance. Using existing.\n", svc)
+            // Continue with existing
+        } else {
+            return err
+        }
+    }
+    if err := shareMgr.ConnectSharedServiceToEnvironment(svc, env.Name); err != nil {
+        return err
+    }
+}
+env.UsesSharedServices = sharedServices
+In down:
+shareMgr := share.NewManager(docker.NewProvider())
+for _, svc := range env.UsesSharedServices {
+    shareMgr.DisconnectSharedServiceFromEnvironment(svc, env.Name)
+    // Reference counting + grace period handled internally
+}
+---
+Phase 4: Compose Processing
+Update: cilo/pkg/compose/compose.go
+func Transform(env *models.Environment, baseFiles []string, overridePath, dnsSuffix string, sharedServices []string) error {
+    // ... load services ...
+    
+    for _, name := range SortedServiceNames(services) {
+        if contains(sharedServices, name) {
+            // Skip: don't create this service in the environment
+            continue
+        }
+        
+        // Check if this service depends_on a shared service
+        if service.DependsOn != nil {
+            serviceOverrides[name]["depends_on"] = filterOut(service.DependsOn, sharedServices)
+        }
+        
+        // ... rest of override generation
+    }
+}
+Update: cilo/pkg/compose/loader.go
+func GetServicesWithLabel(composeFiles []string, labelKey string) ([]string, error)
+func ComputeConfigHash(service *ComposeService) string // For conflict detection
+---
+Phase 5: DNS & Status
+Update: cilo/pkg/dns/render.go
+- Add transparent DNS entries for shared services (same naming as isolated)
+Update: cilo/cmd/commands.go (status command)
+// In status output:
+fmt.Fprintf(w, "NAME\tTYPE\tIP\tURL\t\n")
+for _, service := range env.Services {
+    svcType := "isolated"
+    if contains(env.UsesSharedServices, service.Name) {
+        svcType = "shared"
+    }
+    fmt.Fprintf(w, "%s\t%s\t%s\t%s\t\n", service.Name, svcType, service.IP, service.URL)
+}
+---
+Phase 6: Grace Period & Reference Counting
+In cilo/pkg/share/manager.go:
+func (m *Manager) DisconnectSharedServiceFromEnvironment(serviceName, envName string) error {
+    // 1. Remove env from UsedBy list
+    // 2. If UsedBy is now empty:
+    //    - Set DisconnectTimeout = now + 60s
+    //    - Start background goroutine to check after 60s
+    //    - If still unused after timeout, stop container
+}
+func (m *Manager) EnsureSharedService(serviceName string, composeFiles []string) (string, string, error) {
+    // 1. If shared service exists and is within grace period:
+    //    - Clear DisconnectTimeout
+    //    - Return existing
+    // 2. If doesn't exist:
+    //    - Create from compose definition
+    //    - Set ConfigHash
+}
+---
+Phase 7: Doctor Integration
+Update: cilo/pkg/share/doctor.go (new file)
+func CheckSharedServices(st *models.State) (orphaned, missing, conflicts []Issue, err error)
+type Issue struct {
+    Service string
+    Type    string // "orphaned", "missing", "conflict"
+    Detail  string
+}
+Checks:
+- [ ] Orphaned: container running but reference count = 0
+- [ ] Missing: reference count > 0 but container not running
+- [ ] Conflicts: config hash differs between envs using same shared service
+---
+Summary of Key Decisions
+| Aspect | Decision |
+|--------|----------|
+| Version conflicts | Warn and use existing (default A) |
+| Grace period | 60 seconds, not configurable |
+| Status visibility | cilo status shows isolated/shared column |
+| Inverse flag | Add --isolate to override labels |
+| Network aliases | Required for inter-container DNS |
+| Config hash scope | Image + volumes + ports + command (no env vars) |
+---
+Open Question
+Grace period implementation detail: Should the grace period timer be:
+1. In-memory only (simple, lost on Cilo restart, but probably fine)
+2. Persisted in state (survives restart, more complex)
+My leaning is option 1 for v1 — if Cilo restarts during the grace period, the shared container just gets cleaned up on next cilo doctor run or when someone notices. The 60s window is short enough that restart during it is unlikely. What's your take, objectivley review from first principles no bias?
