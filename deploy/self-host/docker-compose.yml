@@ -1,0 +1,69 @@
+version: "3.8"
+
+services:
+  server:
+    image: ghcr.io/sharedco/cilo-server:latest
+    build:
+      context: ../../server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://cilo:${POSTGRES_PASSWORD}@postgres:5432/cilo?sslmode=disable
+      - CILO_LISTEN_ADDR=:8080
+      - CILO_PROVIDER=${CILO_PROVIDER:-manual}
+      - HETZNER_API_TOKEN=${HETZNER_API_TOKEN:-}
+      - CILO_POOL_MIN_READY=${CILO_POOL_MIN_READY:-3}
+      - CILO_POOL_MAX_TOTAL=${CILO_POOL_MAX_TOTAL:-20}
+      - CILO_POOL_VM_SIZE=${CILO_POOL_VM_SIZE:-cx31}
+      - CILO_POOL_REGION=${CILO_POOL_REGION:-nbg1}
+      - CILO_POOL_IMAGE_ID=${CILO_POOL_IMAGE_ID:-}
+      - CILO_BILLING_ENABLED=${CILO_BILLING_ENABLED:-false}
+      - CILO_METRICS_ENABLED=${CILO_METRICS_ENABLED:-true}
+      - CILO_AUTO_DESTROY_HOURS=${CILO_AUTO_DESTROY_HOURS:-8}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./migrations:/app/migrations:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=cilo
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=cilo
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cilo -d cilo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - CILO_DOMAIN=${CILO_DOMAIN}
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

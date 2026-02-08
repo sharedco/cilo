@@ -1,0 +1,147 @@
+name: 'Cilo Environment'
+description: 'Create isolated preview environments for PRs with Cilo Cloud'
+author: 'Cilo'
+branding:
+  icon: 'cloud'
+  color: 'blue'
+
+inputs:
+  server:
+    description: 'Cilo server URL'
+    required: true
+  api-key:
+    description: 'Cilo API key'
+    required: true
+  environment-name:
+    description: 'Environment name (defaults to pr-<number> or branch name)'
+    required: false
+  project-path:
+    description: 'Path to project directory'
+    required: false
+    default: '.'
+  action:
+    description: 'Action to perform: create, destroy, status'
+    required: false
+    default: 'create'
+  timeout:
+    description: 'Environment timeout in minutes (for auto-cleanup)'
+    required: false
+    default: '60'
+  wait:
+    description: 'Wait for environment to be ready'
+    required: false
+    default: 'true'
+
+outputs:
+  environment-url:
+    description: 'URL to access the environment'
+  environment-id:
+    description: 'Environment ID'
+  environment-status:
+    description: 'Environment status'
+  services:
+    description: 'JSON object of service URLs'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Cilo CLI
+      shell: bash
+      run: |
+        # Download cilo CLI
+        curl -sSL https://github.com/sharedco/cilo/releases/latest/download/cilo-linux-amd64 -o /tmp/cilo
+        chmod +x /tmp/cilo
+        sudo mv /tmp/cilo /usr/local/bin/cilo
+
+    - name: Configure Cilo
+      shell: bash
+      env:
+        CILO_SERVER: ${{ inputs.server }}
+        CILO_API_KEY: ${{ inputs.api-key }}
+      run: |
+        # Create auth file for CI
+        mkdir -p ~/.cilo
+        echo "{\"server\": \"$CILO_SERVER\", \"api_key\": \"$CILO_API_KEY\"}" > ~/.cilo/cloud-auth.json
+        chmod 600 ~/.cilo/cloud-auth.json
+
+    - name: Determine Environment Name
+      id: env-name
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.environment-name }}" ]; then
+          echo "name=${{ inputs.environment-name }}" >> $GITHUB_OUTPUT
+        elif [ -n "${{ github.event.pull_request.number }}" ]; then
+          echo "name=pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+        else
+          # Use branch name, sanitized
+          BRANCH="${{ github.ref_name }}"
+          SANITIZED=$(echo "$BRANCH" | tr '/' '-' | tr '_' '-' | tr '[:upper:]' '[:lower:]' | cut -c1-63)
+          echo "name=$SANITIZED" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Run Cilo Action
+      id: cilo
+      shell: bash
+      env:
+        ENV_NAME: ${{ steps.env-name.outputs.name }}
+        ACTION: ${{ inputs.action }}
+        PROJECT_PATH: ${{ inputs.project-path }}
+        TIMEOUT: ${{ inputs.timeout }}
+        WAIT: ${{ inputs.wait }}
+      run: |
+        set -e
+        
+        case "$ACTION" in
+          create)
+            echo "Creating environment: $ENV_NAME"
+            
+            # Create environment with CI mode (no WireGuard tunnel)
+            OUTPUT=$(cilo cloud up "$ENV_NAME" --from "$PROJECT_PATH" --ci --timeout "${TIMEOUT}m" 2>&1) || {
+              echo "::error::Failed to create environment"
+              echo "$OUTPUT"
+              exit 1
+            }
+            
+            # Get environment details
+            STATUS_OUTPUT=$(cilo cloud status "$ENV_NAME" --json 2>&1) || true
+            
+            if [ -n "$STATUS_OUTPUT" ]; then
+              ENV_ID=$(echo "$STATUS_OUTPUT" | jq -r '.id // empty')
+              ENV_URL=$(echo "$STATUS_OUTPUT" | jq -r '.url // empty')
+              ENV_STATUS=$(echo "$STATUS_OUTPUT" | jq -r '.status // "unknown"')
+              SERVICES=$(echo "$STATUS_OUTPUT" | jq -c '.services // {}')
+              
+              echo "environment-id=$ENV_ID" >> $GITHUB_OUTPUT
+              echo "environment-url=$ENV_URL" >> $GITHUB_OUTPUT
+              echo "environment-status=$ENV_STATUS" >> $GITHUB_OUTPUT
+              echo "services=$SERVICES" >> $GITHUB_OUTPUT
+              
+              echo "✅ Environment created: $ENV_URL"
+            fi
+            ;;
+            
+          destroy)
+            echo "Destroying environment: $ENV_NAME"
+            cilo cloud destroy "$ENV_NAME" --force || {
+              echo "::warning::Environment may not exist or already destroyed"
+            }
+            echo "✅ Environment destroyed"
+            ;;
+            
+          status)
+            echo "Getting status for: $ENV_NAME"
+            STATUS_OUTPUT=$(cilo cloud status "$ENV_NAME" --json 2>&1) || {
+              echo "environment-status=not_found" >> $GITHUB_OUTPUT
+              exit 0
+            }
+            
+            ENV_STATUS=$(echo "$STATUS_OUTPUT" | jq -r '.status // "unknown"')
+            echo "environment-status=$ENV_STATUS" >> $GITHUB_OUTPUT
+            echo "Status: $ENV_STATUS"
+            ;;
+            
+          *)
+            echo "::error::Unknown action: $ACTION"
+            exit 1
+            ;;
+        esac

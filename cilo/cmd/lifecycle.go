@@ -10,9 +10,11 @@ import (
 
 	"github.com/sharedco/cilo/pkg/compose"
 	"github.com/sharedco/cilo/pkg/dns"
+	"github.com/sharedco/cilo/pkg/engine"
 	envpkg "github.com/sharedco/cilo/pkg/env"
 	"github.com/sharedco/cilo/pkg/filesystem"
 	"github.com/sharedco/cilo/pkg/models"
+	_ "github.com/sharedco/cilo/pkg/parsers" // register parsers
 	"github.com/sharedco/cilo/pkg/runtime"
 	"github.com/sharedco/cilo/pkg/runtime/docker"
 	"github.com/sharedco/cilo/pkg/share"
@@ -181,6 +183,14 @@ var upCmd = &cobra.Command{
 		}
 
 		workspace := state.GetEnvStoragePath(project, name)
+
+		spec, err := engine.DetectAndParse(workspace)
+		if err != nil {
+			fmt.Printf("Warning: failed to detect project format: %v\n", err)
+		} else {
+			fmt.Printf("Detected %s project with %d services\n", spec.Source, len(spec.Services))
+		}
+
 		projectConfig, err := models.LoadProjectConfigFromPath(workspace)
 		if err != nil {
 			return fmt.Errorf("failed to load project config: %w", err)
@@ -469,6 +479,8 @@ func init() {
 	destroyCmd.Flags().Bool("keep-workspace", false, "Don't delete the workspace directory")
 	destroyCmd.Flags().Bool("force", false, "Skip confirmation prompt")
 	destroyCmd.Flags().String("project", "", "Project name (defaults to configured project)")
+
+	rootCmd.AddCommand(createCmd, upCmd, downCmd, destroyCmd)
 }
 
 type CopyOptions struct {

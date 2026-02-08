@@ -1,8 +1,8 @@
 package main
 
 import (
-	"os"
 	"github.com/sharedco/cilo/cmd"
+	"os"
 )
 
 func main() {

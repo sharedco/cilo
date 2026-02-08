@@ -92,10 +92,10 @@ func InitializeState(baseSubnetFlag string, dnsPortFlag int) error {
 	}
 
 	st := &models.State{
-		Version:        2,
-		BaseSubnet:     baseSubnetFlag,
-		DNSPort:        dnsPortFlag,
-		SubnetCounter:  0,
+		Version:       2,
+		BaseSubnet:    baseSubnetFlag,
+		DNSPort:       dnsPortFlag,
+		SubnetCounter: 0,
 		Hosts: map[string]*models.Host{
 			"local": {
 				ID:           "local",

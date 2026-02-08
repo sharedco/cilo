@@ -33,12 +33,12 @@ type SharedNetwork struct {
 
 // SharedService represents a service shared across multiple environments
 type SharedService struct {
-	Name              string    `json:"name"`               // Service name (e.g., "elasticsearch")
-	Container         string    `json:"container"`          // Docker container name (e.g., "cilo_shared_elasticsearch")
-	IP                string    `json:"ip"`                 // Primary IP address
-	Project           string    `json:"project"`            // Project that owns this shared service
-	Image             string    `json:"image"`              // Image with tag for conflict detection
-	ConfigHash        string    `json:"config_hash"`        // Hash of service definition for conflict detection
+	Name              string    `json:"name"`        // Service name (e.g., "elasticsearch")
+	Container         string    `json:"container"`   // Docker container name (e.g., "cilo_shared_elasticsearch")
+	IP                string    `json:"ip"`          // Primary IP address
+	Project           string    `json:"project"`     // Project that owns this shared service
+	Image             string    `json:"image"`       // Image with tag for conflict detection
+	ConfigHash        string    `json:"config_hash"` // Hash of service definition for conflict detection
 	CreatedAt         time.Time `json:"created_at"`
 	UsedBy            []string  `json:"used_by"`            // Environment keys: "project/env"
 	DisconnectTimeout time.Time `json:"disconnect_timeout"` // Grace period timestamp

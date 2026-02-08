@@ -100,10 +100,10 @@ func (m *Manager) createSharedService(serviceName, project string, composeFiles 
 				"container_name": containerName,
 				"network_mode":   "bridge", // Use default bridge, we'll attach to env networks later
 				"labels": map[string]string{
-					"cilo":          "true",
-					"cilo.shared":   "true",
-					"cilo.project":  project,
-					"cilo.service":  serviceName,
+					"cilo":         "true",
+					"cilo.shared":  "true",
+					"cilo.project": project,
+					"cilo.service": serviceName,
 				},
 			},
 		},
@@ -111,13 +111,13 @@ func (m *Manager) createSharedService(serviceName, project string, composeFiles 
 
 	// Copy over relevant fields from original service
 	service := sharedComposeFile["services"].(map[string]interface{})[serviceName].(map[string]interface{})
-	
+
 	if serviceConfig.Environment != nil {
 		service["environment"] = serviceConfig.Environment
 	}
 	if serviceConfig.Volumes != nil && len(serviceConfig.Volumes) > 0 {
 		service["volumes"] = serviceConfig.Volumes
-		
+
 		// Add volume definitions for named volumes used by this service
 		namedVolumes := extractNamedVolumes(serviceConfig.Volumes)
 		if len(namedVolumes) > 0 {
@@ -197,7 +197,7 @@ func (m *Manager) loadServiceConfig(serviceName string, composeFiles []string) (
 // loadVolumeDefinitions loads all volume definitions from compose files
 func (m *Manager) loadVolumeDefinitions(composeFiles []string) (map[string]interface{}, error) {
 	volumes := make(map[string]interface{})
-	
+
 	for i := len(composeFiles) - 1; i >= 0; i-- {
 		data, err := os.ReadFile(composeFiles[i])
 		if err != nil {
@@ -297,18 +297,18 @@ func (m *Manager) RegisterSharedService(serviceName, project, containerName, ip 
 		}
 
 		key := fmt.Sprintf("%s/%s", project, serviceName)
-		
+
 		sharedService := st.SharedServices[key]
 		if sharedService == nil {
 			sharedService = &models.SharedService{
-				Name:      serviceName,
-				Container: containerName,
-				IP:        ip,
-				Project:   project,
-				Image:     serviceConfig.Image,
+				Name:       serviceName,
+				Container:  containerName,
+				IP:         ip,
+				Project:    project,
+				Image:      serviceConfig.Image,
 				ConfigHash: configHash,
-				CreatedAt: time.Now(),
-				UsedBy:    []string{},
+				CreatedAt:  time.Now(),
+				UsedBy:     []string{},
 			}
 			st.SharedServices[key] = sharedService
 		} else {
@@ -453,4 +453,3 @@ func (m *Manager) startContainer(containerName string) error {
 func GetSharedServiceKey(project, serviceName string) string {
 	return fmt.Sprintf("%s/%s", project, serviceName)
 }
-
