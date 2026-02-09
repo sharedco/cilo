@@ -108,10 +108,10 @@ type WireGuardExchangeRequest struct {
 
 // WireGuardExchangeResponse is the response from key exchange
 type WireGuardExchangeResponse struct {
-	AssignedIP     string `json:"assigned_ip"`
-	ServerPubKey   string `json:"server_public_key"`
-	ServerEndpoint string `json:"server_endpoint"`
-	AllowedIPs     string `json:"allowed_ips"`
+	AssignedIP     string   `json:"assigned_ip"`
+	ServerPubKey   string   `json:"server_public_key"`
+	ServerEndpoint string   `json:"server_endpoint"`
+	AllowedIPs     []string `json:"allowed_ips"`
 }
 
 // CreateEnvironment creates a new remote environment

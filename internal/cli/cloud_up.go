@@ -376,12 +376,7 @@ func setupWireGuardInterface(tun *tunnel.Tunnel, privateKey string, wgResp *clou
 		return fmt.Errorf("set interface up: %w", err)
 	}
 
-	allowedIPs := strings.Split(wgResp.AllowedIPs, ",")
-	for i, ip := range allowedIPs {
-		allowedIPs[i] = strings.TrimSpace(ip)
-	}
-
-	if err := manager.AddPeer(wgResp.ServerPubKey, wgResp.ServerEndpoint, allowedIPs, 25*time.Second); err != nil {
+	if err := manager.AddPeer(wgResp.ServerPubKey, wgResp.ServerEndpoint, wgResp.AllowedIPs, 25*time.Second); err != nil {
 		tunnel.RemoveInterface(tun.Interface)
 		return fmt.Errorf("add peer: %w", err)
 	}
