@@ -1,2 +1,47 @@
-.sisyphus
-bin/
+# Binaries
+/cilo
+/cilo-server
+/cilo-agent
+/cilo-wg-helper
+
+# Build directories
+/bin/
+/build/
+/dist/
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Cilo specific
+.cilo/
+!examples/*/.cilo/
+
+# Temporary files
+*.tmp
+*.temp
+*.log

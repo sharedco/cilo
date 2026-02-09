@@ -10,7 +10,7 @@ before:
 
 builds:
   - id: cilo
-    main: ./cilo/main.go
+    main: ./cmd/cilo/main.go
     binary: cilo
     env:
       - CGO_ENABLED=0
@@ -22,9 +22,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/sharedco/cilo/cmd.version={{.Version}}
-      - -X github.com/sharedco/cilo/cmd.commit={{.Commit}}
-      - -X github.com/sharedco/cilo/cmd.date={{.Date}}
+      - -X github.com/sharedco/cilo/internal/cli.version={{.Version}}
+      - -X github.com/sharedco/cilo/internal/cli.commit={{.Commit}}
+      - -X github.com/sharedco/cilo/internal/cli.date={{.Date}}
 
 archives:
   - id: cilo

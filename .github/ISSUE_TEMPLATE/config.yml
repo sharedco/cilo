@@ -1,0 +1,17 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Cilo Documentation
+    url: https://github.com/sharedco/cilo/tree/main/docs
+    about: Check the documentation for answers to common questions
+  
+  - name: Cilo Discussions
+    url: https://github.com/sharedco/cilo/discussions
+    about: Ask questions and discuss features with the community
+  
+  - name: Security Vulnerability
+    url: https://github.com/sharedco/cilo/security/advisories/new
+    about: Report security vulnerabilities privately (do not open public issues)
+  
+  - name: Cilo Examples
+    url: https://github.com/sharedco/cilo/tree/main/examples
+    about: See practical usage examples and patterns

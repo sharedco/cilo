@@ -1,85 +1,81 @@
-@_default:
-  just --list
-
 # Build cilo binary
 build:
-  cd cilo && make build
+  go build -o cilo ./cmd/cilo
+
+# Build cilo-server binary
+build-server:
+  go build -o cilo-server ./cmd/cilo-server
+
+# Build cilo-agent binary
+build-agent:
+  go build -o cilo-agent ./cmd/cilo-agent
+
+# Build all binaries
+build-all: build build-server build-agent
 
 # Quick dev build (no version info)
 dev:
-  cd cilo && make dev
+  go build -o cilo ./cmd/cilo
 
 # Install cilo to ~/.local/bin for development
-dev-install:
-  cd cilo && make dev-install
+dev-install: dev
+  mkdir -p ~/.local/bin
+  cp cilo ~/.local/bin/
+  @echo "Installed to ~/.local/bin/cilo"
 
 # Install cilo to /usr/local/bin (requires sudo)
-install:
-  cd cilo && make install
+install: build
+  sudo cp cilo /usr/local/bin/
+  @echo "Installed to /usr/local/bin/cilo"
 
 # Show current version
 version:
-  cd cilo && make version
-
-# Bump patch version and build (0.2.5 -> 0.2.6)
-patch:
-  cd cilo && make patch
-
-# Bump minor version and build (0.2.5 -> 0.3.0)
-minor:
-  cd cilo && make minor
-
-# Bump major version and build (0.2.5 -> 1.0.0)
-major:
-  cd cilo && make major
-
-# Quick development cycle: bump patch, build, and dev-install
-ship:
-  cd cilo && make patch
-  cd cilo && make dev-install
-  @echo ""
-  @echo "🚀 Ready to test!"
-  @cd cilo && make version
-
-# Clean build artifacts
-clean:
-  cd cilo && make clean
+  ./cilo version
 
 # Run unit tests
 test *args:
-  cd cilo && go test {{args}} ./...
+  go test {{args}} ./internal/...
 
 # Run tests with verbose output
 test-verbose:
-  cd cilo && go test -v ./...
-
-# Run unit tests only
-test-unit *args:
-  cd cilo && make test {{args}}
+  go test -v ./internal/...
 
 # Run E2E tests
 test-e2e:
-  cd cilo && CILO_E2E=1 go test -tags e2e ./tests/e2e
+  export CILO_E2E_ENABLED=true && export CILO_BINARY=./cilo && go test -tags e2e ./test/e2e/...
 
 # Run integration tests (shared services - quick)
 test-integration:
-  ./tests/integration/verify-shared-services.sh
+  ./test/integration/verify-shared-services.sh
 
 # Run integration tests (full suite)
 test-integration-full:
-  CILO_E2E=1 ./tests/integration/test-shared-services.sh
+  export CILO_E2E=1 && ./test/integration/test-shared-services.sh
 
 # Run all tests (unit + e2e + integration)
-test-all: test-unit test-e2e test-integration
+test-all: test test-e2e test-integration
 
 # Format Go code
 fmt:
-  cd cilo && go fmt ./...
+  go fmt ./...
 
 # Run Go linter
 lint:
-  cd cilo && golangci-lint run || go vet ./...
+  golangci-lint run || go vet ./...
 
 # Check for issues before commit
-check: fmt lint test-unit
+check: fmt lint test
   @echo "✓ All checks passed"
+
+# Clean build artifacts
+clean:
+  rm -f cilo cilo-server cilo-agent
+  go clean -cache
+
+# Run cilo doctor
+doctor:
+  ./cilo doctor
+
+# Initialize cilo (requires sudo)
+init:
+  sudo ./cilo init
