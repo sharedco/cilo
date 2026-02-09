@@ -37,7 +37,7 @@ func Load() *Config {
 		ListenAddr:   getEnv("CILO_AGENT_LISTEN", "0.0.0.0:8080"),
 		ReadTimeout:  getDuration("CILO_AGENT_READ_TIMEOUT", 30*time.Second),
 		WriteTimeout: getDuration("CILO_AGENT_WRITE_TIMEOUT", 30*time.Second),
-		WorkspaceDir: getEnv("CILO_WORKSPACE_DIR", "/var/lib/cilo/envs"),
+		WorkspaceDir: getEnv("CILO_WORKSPACE_DIR", "/var/cilo/envs"),
 		WGInterface:  getEnv("CILO_WG_INTERFACE", "wg0"),
 		WGListenPort: getInt("CILO_WG_PORT", 51820),
 		WGPrivateKey: getEnv("CILO_WG_PRIVATE_KEY", ""),

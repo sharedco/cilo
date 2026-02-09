@@ -80,64 +80,11 @@ doctor:
 init:
   sudo ./cilo init
 
-# Start self-hosted server ONLY (no agent)
-# Use this if you plan to add external agents only
+# Start self-hosted server and agent (requires sudo for agent install)
 server-up:
-  @echo "Starting Cilo Server..."
-  @cd deploy/self-host && \
-  if [ ! -f .env ]; then \
-    POSTGRES_PASSWORD=$$(openssl rand -base64 32); \
-    echo "CILO_DOMAIN=localhost" > .env; \
-    echo "POSTGRES_PASSWORD=$$POSTGRES_PASSWORD" >> .env; \
-    echo "CILO_PROVIDER=manual" >> .env; \
-    echo "CILO_BILLING_ENABLED=false" >> .env; \
-    echo "CILO_METRICS_ENABLED=true" >> .env; \
-    echo "CILO_AUTO_DESTROY_HOURS=8" >> .env; \
-    echo "✓ Created .env file"; \
-  fi
-  @cd /var/deployment/sharedco/cilo && DOCKER_BUILDKIT=0 docker build -t cilo-server:local -f server/Dockerfile . > /dev/null 2>&1
-  @cd deploy/self-host && docker compose up -d
-  @echo "Waiting for server to start..."
-  @sleep 5
-  @for i in {1..30}; do \
-    if curl -s http://localhost:8080/health > /dev/null 2>&1; then \
-      echo "✓ Server is healthy"; \
-      break; \
-    fi; \
-    if [ $$i -eq 30 ]; then \
-      echo "✗ Server failed to start"; \
-      docker compose logs server; \
-      exit 1; \
-    fi; \
-    sleep 1; \
-  done
-  @docker exec self-host-postgres-1 psql -U cilo -d cilo -c "INSERT INTO teams (id, name, created_at) VALUES ('team-default', 'Default Team', NOW()) ON CONFLICT DO NOTHING;" > /dev/null 2>&1 || true
-  @echo ""
-  @echo "Creating admin API key..."
-  @cd deploy/self-host && docker compose exec server cilo-server admin create-key --team team-default --scope admin --name "admin-key"
-  @echo ""
-  @echo "Server running at http://localhost:8080"
-  @echo ""
-  @echo "Next steps:"
-  @echo "  just server-add-self    # Register this machine as an agent"
-  @echo "  just add-machine-ts     # Add external machines"
-
-# Start server AND register this machine as an agent (recommended for single-machine setup)
-server-up-self: server-up server-add-self
-
-# Register this machine as an agent (after server-up)
-server-add-self:
-  @echo "Registering this machine as an agent..."
-  @cd deploy/self-host
-  @TAILSCALE_IP=$$(tailscale ip -4 2>/dev/null || echo "127.0.0.1"); \
-  CURRENT_USER=$$(whoami); \
-  MACHINE_NAME="$$(hostname)-self"; \
-  docker compose exec server cilo-server machines remove "$$MACHINE_NAME" 2>/dev/null || true; \
-  docker compose exec server cilo-server machines add --name "$$MACHINE_NAME" --host "$$TAILSCALE_IP" --ssh-user "$$CURRENT_USER" --size manual; \
-  echo ""; \
-  echo "✓ This machine (\033[1m$$MACHINE_NAME\033[0m) is now an agent!"; \
-  echo ""
-  @just machines
+  @echo "Starting Cilo Server + Agent..."
+  @echo "This requires sudo to install cilo-agent to /usr/local/bin"
+  @sudo ./scripts/start-server.sh
 
 # Stop self-hosted server
 server-down:

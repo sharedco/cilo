@@ -83,7 +83,7 @@ func runCloudUp(cmd *cobra.Command, args []string) error {
 		spec.Source, len(spec.Services), spec.SourcePath)
 
 	if ciMode {
-		return runCloudUpCI(envName, spec, ciTimeout)
+		return runCloudUpCI(envName, spec, ciTimeout, absPath)
 	}
 
 	fmt.Printf("\nCreating cloud environment: %s\n", envName)
@@ -93,7 +93,7 @@ func runCloudUp(cmd *cobra.Command, args []string) error {
 	return runCloudUpMain(envName, absPath, spec, build)
 }
 
-func runCloudUpCI(envName string, spec *engine.EnvironmentSpec, timeout int) error {
+func runCloudUpCI(envName string, spec *engine.EnvironmentSpec, timeout int, fromPath string) error {
 	fmt.Printf("\n=== CI Mode: Direct IP Access (No WireGuard) ===\n")
 	fmt.Printf("Environment: %s\n", envName)
 	fmt.Printf("Auto-destroy: %d minutes\n\n", timeout)
@@ -120,6 +120,30 @@ func runCloudUpCI(envName string, spec *engine.EnvironmentSpec, timeout int) err
 	})
 	if err != nil {
 		return fmt.Errorf("create environment: %w", err)
+	}
+
+	envID := resp.Environment.ID
+	fmt.Printf("Environment created: %s\n", envID)
+
+	// Sync workspace to remote machine
+	if resp.Machine != nil && resp.Machine.PublicIP != "" {
+		fmt.Println("→ Syncing workspace to remote machine...")
+		machineIP := resp.Machine.PublicIP
+		syncCfg := cloud.SyncConfig{
+			LocalPath:       fromPath,
+			RemoteHost:      machineIP,
+			RemoteUser:      "isaiahdahl",
+			RemotePath:      fmt.Sprintf("/var/cilo/envs/%s", envID),
+			ExcludePatterns: cloud.DefaultExcludePatterns(),
+		}
+		if err := cloud.SyncWorkspace(ctx, syncCfg); err != nil {
+			fmt.Printf("  ⚠ Sync warning: %v\n", err)
+		} else {
+			fmt.Println("  ✓ Workspace synced")
+			if err := client.SyncComplete(ctx, envID); err != nil {
+				fmt.Printf("  ⚠ Failed to signal sync complete: %v\n", err)
+			}
+		}
 	}
 
 	outputCIResult(resp, envName)

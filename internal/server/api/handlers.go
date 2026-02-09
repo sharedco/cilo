@@ -235,11 +235,16 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request)
 func (s *Server) provisionEnvironment(env *store.Environment, machine *store.Machine) {
 	ctx := context.Background()
 
-	agentAddr := fmt.Sprintf("http://%s:8080", machine.WGEndpoint)
+	// Use WireGuard endpoint if available, otherwise fall back to public IP
+	agentHost := machine.WGEndpoint
+	if agentHost == "" {
+		agentHost = machine.PublicIP
+	}
+	agentAddr := fmt.Sprintf("http://%s:8081", agentHost)
 	agentClient := agent.NewClient(agentAddr)
 
 	upReq := agent.UpRequest{
-		WorkspacePath: fmt.Sprintf("/var/lib/cilo/envs/%s", env.ID),
+		WorkspacePath: fmt.Sprintf("/var/cilo/envs/%s", env.ID),
 		EnvName:       env.Name,
 		Subnet:        env.Subnet,
 		Build:         true,

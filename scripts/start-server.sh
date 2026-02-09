@@ -4,6 +4,14 @@ set -e
 echo "Starting Cilo Server with self-registration..."
 echo ""
 
+# Build cilo-agent first (as regular user with full PATH)
+if [ ! -f /var/deployment/sharedco/cilo/cilo-agent ]; then
+  echo "Building cilo-agent..."
+  cd /var/deployment/sharedco/cilo
+  go build -o cilo-agent ./cmd/cilo-agent
+  echo "✓ cilo-agent built"
+fi
+
 cd /var/deployment/sharedco/cilo/deploy/self-host
 
 # Create env file if needed
@@ -53,6 +61,29 @@ docker exec self-host-postgres-1 psql -U cilo -d cilo -c "INSERT INTO teams (id,
 echo ""
 echo "Creating admin API key..."
 docker compose exec server cilo-server admin create-key --team team-default --scope admin --name "admin-key"
+
+echo ""
+echo "Installing cilo-agent..."
+if [ ! -f /usr/local/bin/cilo-agent ]; then
+  echo "Copying cilo-agent to /usr/local/bin (requires sudo)..."
+  sudo cp /var/deployment/sharedco/cilo/cilo-agent /usr/local/bin/
+  sudo chmod +x /usr/local/bin/cilo-agent
+  echo "✓ cilo-agent installed"
+fi
+
+if ! pgrep -x "cilo-agent" > /dev/null; then
+  echo "Starting cilo-agent..."
+  export CILO_AGENT_LISTEN=0.0.0.0:8081
+  /usr/local/bin/cilo-agent > ~/cilo-agent.log 2>&1 &
+  sleep 2
+  if pgrep -x "cilo-agent" > /dev/null; then
+    echo "✓ cilo-agent started (PID: $(pgrep -x cilo-agent))"
+  else
+    echo "⚠ Failed to start cilo-agent, check /tmp/cilo-agent.log"
+  fi
+else
+  echo "✓ cilo-agent already running (PID: $(pgrep -x cilo-agent))"
+fi
 
 # Register this machine as agent
 echo ""
