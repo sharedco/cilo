@@ -101,6 +101,8 @@ type CreateEnvironmentResponse struct {
 // WireGuardExchangeRequest is the request for WireGuard key exchange
 type WireGuardExchangeRequest struct {
 	EnvironmentID string `json:"environment_id"`
+	MachineID     string `json:"machine_id"`
+	UserID        string `json:"user_id"`
 	PublicKey     string `json:"public_key"`
 }
 
