@@ -98,11 +98,13 @@ type CreateEnvironmentRequest struct {
 }
 
 type CreateEnvironmentResponse struct {
-	ID        string `json:"id"`
-	Status    string `json:"status"`
-	MachineID string `json:"machine_id"`
-	Message   string `json:"message"`
+	Environment *store.Environment `json:"environment"`
+	Machine     *store.Machine     `json:"machine"`
 }
+
+// ensure store types are imported
+var _ = &store.Environment{}
+var _ = &store.Machine{}
 
 var subnetCounter uint32 = 0
 
@@ -213,10 +215,19 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request)
 	go s.provisionEnvironment(env, availableMachine)
 
 	resp := CreateEnvironmentResponse{
-		ID:        envID,
-		Status:    "provisioning",
-		MachineID: availableMachine.ID,
-		Message:   "Environment creation initiated. Poll GET /v1/environments/" + envID + " for status.",
+		Environment: &store.Environment{
+			ID:        envID,
+			Name:      req.Name,
+			Project:   req.Project,
+			Status:    "provisioning",
+			Subnet:    subnet,
+			MachineID: &availableMachine.ID,
+		},
+		Machine: &store.Machine{
+			ID:       availableMachine.ID,
+			PublicIP: availableMachine.PublicIP,
+			Status:   "assigned",
+		},
 	}
 	respondJSON(w, http.StatusAccepted, resp)
 }
