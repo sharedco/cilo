@@ -45,6 +45,22 @@ func respondJSON(w http.ResponseWriter, status int, data interface{}) {
 	}
 }
 
+func (s *Server) handleValidateAuth(w http.ResponseWriter, r *http.Request) {
+	teamID := getTeamID(r)
+	if teamID == "" {
+		respondJSON(w, http.StatusUnauthorized, map[string]string{
+			"error": "Not authenticated",
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"team_id":   teamID,
+		"team_name": "team-default",
+		"scope":     getScope(r),
+	})
+}
+
 // Health check handler
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]string{

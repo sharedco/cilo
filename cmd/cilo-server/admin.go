@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sharedco/cilo/internal/server/auth"
 	"github.com/sharedco/cilo/internal/server/config"
 	"github.com/sharedco/cilo/internal/server/store"
 	"github.com/spf13/cobra"
@@ -145,11 +146,12 @@ func runCreateKey(cmd *cobra.Command, args []string) error {
 	}
 	defer st.Close()
 
-	// Generate API key
+	fullKey, keyHash, keyPrefix, err := auth.GenerateAPIKey()
+	if err != nil {
+		return fmt.Errorf("failed to generate API key: %w", err)
+	}
+
 	keyID := uuid.New().String()
-	keyPrefix := generateKeyPrefix()
-	keySecret := generateKeySecret()
-	keyHash := hashKey(keySecret)
 
 	// Create API key record
 	apiKey := &store.APIKey{
@@ -165,9 +167,6 @@ func runCreateKey(cmd *cobra.Command, args []string) error {
 	if err := st.CreateAPIKey(ctx, apiKey); err != nil {
 		return fmt.Errorf("failed to create API key: %w", err)
 	}
-
-	// Display the key (only time it's shown)
-	fullKey := fmt.Sprintf("%s.%s", keyPrefix, keySecret)
 
 	fmt.Println("✓ API key created successfully")
 	fmt.Println()

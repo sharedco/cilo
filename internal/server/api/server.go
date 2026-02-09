@@ -87,6 +87,9 @@ func (s *Server) setupRoutes() {
 
 	// API v1 routes
 	s.router.Route("/v1", func(r chi.Router) {
+		// Auth validation (protected, but returns user info)
+		r.With(s.authMiddleware).Get("/auth/validate", s.handleValidateAuth)
+
 		// Auth routes (protected)
 		r.Route("/auth", func(r chi.Router) {
 			r.Use(s.authMiddleware)
