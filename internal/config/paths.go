@@ -6,6 +6,7 @@ package config
 
 import (
 	"os"
+	"os/user"
 	"path/filepath"
 )
 
@@ -14,7 +15,13 @@ func GetCiloHome() string {
 		return filepath.Join(home, ".cilo")
 	}
 	if sudoUser := os.Getenv("SUDO_USER"); sudoUser != "" {
-		return filepath.Join("/home", sudoUser, ".cilo")
+		u, err := user.Lookup(sudoUser)
+		if err == nil && u.HomeDir != "" {
+			return filepath.Join(u.HomeDir, ".cilo")
+		}
+		if home := os.Getenv("HOME"); home != "" {
+			return filepath.Join(home, ".cilo")
+		}
 	}
 	return filepath.Join(os.Getenv("HOME"), ".cilo")
 }

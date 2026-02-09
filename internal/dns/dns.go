@@ -148,20 +148,21 @@ func RemoveDNS(envName string) error {
 }
 
 func startDNS() error {
+	if _, err := exec.LookPath("dnsmasq"); err != nil {
+		return fmt.Errorf("dnsmasq is not installed. Please install it:\n\n  macOS: brew install dnsmasq\n  Ubuntu/Debian: sudo apt install dnsmasq\n  Fedora: sudo dnf install dnsmasq\n  Arch: sudo pacman -S dnsmasq")
+	}
+
 	dnsDir := getDNSDir()
 	configPath := filepath.Join(dnsDir, dnsConfFile)
 	pidPath := filepath.Join(dnsDir, dnsPidFile)
 
-	// Check if dnsmasq is already running
 	if data, err := os.ReadFile(pidPath); err == nil {
 		pid := strings.TrimSpace(string(data))
 		if _, err := os.Stat(fmt.Sprintf("/proc/%s", pid)); err == nil {
-			// Already running, reload instead
 			return reloadDNSRestart()
 		}
 	}
 
-	// Start dnsmasq
 	cmd := exec.Command("dnsmasq", "--conf-file="+configPath, fmt.Sprintf("--pid-file=%s", pidPath))
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start dnsmasq: %w", err)
@@ -266,17 +267,10 @@ Domains=~test
 }
 
 func setupMacOSResolver(state *models.State) error {
-	// macOS uses /etc/resolver/
 	if _, err := os.Stat(resolverDir); os.IsNotExist(err) {
-		fmt.Printf("Please create %s directory with:\n", resolverDir)
-		fmt.Printf("  sudo mkdir -p %s\n", resolverDir)
-		fmt.Println("Then add the test resolver:")
-		port := defaultDNSPort
-		if state != nil && state.DNSPort != 0 {
-			port = state.DNSPort
+		if err := os.MkdirAll(resolverDir, 0755); err != nil {
+			return fmt.Errorf("failed to create resolver directory: %w", err)
 		}
-		fmt.Printf("  echo 'nameserver 127.0.0.1\nport %d' | sudo tee %s/test\n", port, resolverDir)
-		return fmt.Errorf("resolver directory not found")
 	}
 
 	resolverFile := filepath.Join(resolverDir, "test")
@@ -288,11 +282,12 @@ func setupMacOSResolver(state *models.State) error {
 
 	existing, _ := os.ReadFile(resolverFile)
 	if string(existing) == content {
-		return nil // Already configured
+		return nil
 	}
 
-	fmt.Println("Please run the following command to configure DNS:")
-	fmt.Printf("  echo 'nameserver 127.0.0.1\nport %d' | sudo tee %s/test\n", port, resolverDir)
+	if err := os.WriteFile(resolverFile, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write resolver file: %w", err)
+	}
 
 	return nil
 }
