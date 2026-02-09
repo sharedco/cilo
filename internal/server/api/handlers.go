@@ -283,8 +283,19 @@ func (s *Server) provisionEnvironment(env *store.Environment, machine *store.Mac
 }
 
 func (s *Server) handleListEnvironments(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": "not yet implemented",
+	ctx := r.Context()
+	teamID := getTeamID(r)
+
+	environments, err := s.store.ListEnvironments(ctx, teamID)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to list environments: " + err.Error(),
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]interface{}{
+		"environments": environments,
 	})
 }
 
