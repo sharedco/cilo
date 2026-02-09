@@ -71,6 +71,10 @@ func runCloudUp(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no supported project format found: %w", err)
 	}
 
+	if spec.Project == "" {
+		spec.Project = filepath.Base(absPath)
+	}
+
 	fmt.Printf("Found %s project (%d services): %s\n",
 		spec.Source, len(spec.Services), spec.SourcePath)
 
