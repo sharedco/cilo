@@ -113,13 +113,27 @@ func StartTunnelDaemon(cfg *tunnel.DaemonConfig) error {
 		return fmt.Errorf("get executable: %w", err)
 	}
 
-	cmd := exec.Command("sudo", executable, "tunnel", "daemon")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	logDir, _ := tunnel.DaemonDir()
+	os.MkdirAll(logDir, 0755)
+	logFile, err := os.OpenFile(
+		logDir+"/daemon.log",
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND,
+		0644,
+	)
+	if err != nil {
+		return fmt.Errorf("create log file: %w", err)
+	}
+
+	cmd := exec.Command("sudo", "-b", executable, "tunnel", "daemon")
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Stdin = nil
 
 	if err := cmd.Start(); err != nil {
+		logFile.Close()
 		return fmt.Errorf("start daemon: %w", err)
 	}
+	logFile.Close()
 
 	for i := 0; i < 30; i++ {
 		time.Sleep(100 * time.Millisecond)

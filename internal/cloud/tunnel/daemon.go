@@ -37,8 +37,7 @@ type DaemonState struct {
 	StartedAt     time.Time `json:"started_at"`
 }
 
-// daemonDir returns the directory for daemon state files
-func daemonDir() (string, error) {
+func DaemonDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
@@ -48,7 +47,7 @@ func daemonDir() (string, error) {
 
 // configPath returns the path to the daemon config file
 func configPath() (string, error) {
-	dir, err := daemonDir()
+	dir, err := DaemonDir()
 	if err != nil {
 		return "", err
 	}
@@ -57,7 +56,7 @@ func configPath() (string, error) {
 
 // pidPath returns the path to the daemon PID file
 func pidPath() (string, error) {
-	dir, err := daemonDir()
+	dir, err := DaemonDir()
 	if err != nil {
 		return "", err
 	}
@@ -66,7 +65,7 @@ func pidPath() (string, error) {
 
 // statePath returns the path to the daemon state file
 func statePath() (string, error) {
-	dir, err := daemonDir()
+	dir, err := DaemonDir()
 	if err != nil {
 		return "", err
 	}
@@ -75,7 +74,7 @@ func statePath() (string, error) {
 
 // socketPath returns the path to the daemon control socket
 func socketPath() (string, error) {
-	dir, err := daemonDir()
+	dir, err := DaemonDir()
 	if err != nil {
 		return "", err
 	}
@@ -84,7 +83,7 @@ func socketPath() (string, error) {
 
 // SaveDaemonConfig saves the daemon configuration
 func SaveDaemonConfig(cfg *DaemonConfig) error {
-	dir, err := daemonDir()
+	dir, err := DaemonDir()
 	if err != nil {
 		return err
 	}
@@ -125,8 +124,18 @@ func LoadDaemonConfig() (*DaemonConfig, error) {
 	return &cfg, nil
 }
 
-// SaveDaemonState saves the daemon state
 func SaveDaemonState(state *DaemonState) error {
+	dir, err := DaemonDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0755); err != nil {
+		return err
+	}
+
 	path, err := statePath()
 	if err != nil {
 		return err
@@ -137,7 +146,10 @@ func SaveDaemonState(state *DaemonState) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0644)
 }
 
 // LoadDaemonState loads the daemon state
@@ -173,7 +185,7 @@ func LoadDaemonState() (*DaemonState, error) {
 
 // ClearDaemonState removes all daemon state files
 func ClearDaemonState() error {
-	dir, err := daemonDir()
+	dir, err := DaemonDir()
 	if err != nil {
 		return err
 	}
