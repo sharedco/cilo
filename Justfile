@@ -127,3 +127,28 @@ remove-machine name:
 add-machine-ts name tailscale-ip user:
   cd deploy/self-host && docker compose exec server cilo-server machines add --name {{name}} --host {{tailscale-ip}} --ssh-user {{user}} --size manual
   @echo "✓ Machine {{name}} added. Run 'just machines' to verify."
+
+# Clean up all tunnel state (kills processes, removes state files)
+tunnel-clean:
+  @echo "Cleaning up tunnel state..."
+  sudo pkill -9 -f "cilo tunnel" || true
+  sudo rm -rf ~/.cilo/tunnel
+  @echo "✓ Tunnel cleaned. Run 'sudo cilo cloud up <name>' to restart."
+
+# Nuclear clean - wipe ALL cilo state on this machine (tunnel, cloud, dns, auth)
+clean-all:
+  @echo "🧹 Nuclear clean - removing ALL cilo state..."
+  @echo "  → Killing tunnel processes..."
+  sudo pkill -9 -f "cilo tunnel" || true
+  @echo "  → Removing tunnel state..."
+  sudo rm -rf ~/.cilo/tunnel
+  @echo "  → Removing cloud state and auth..."
+  rm -f ~/.cilo/state.json ~/.cilo/cloud-auth.json
+  @echo "  → Removing DNS config..."
+  rm -rf ~/.cilo/dns
+  @echo "  → Removing local environments..."
+  rm -rf ~/.cilo/envs
+  @echo "  → Flushing DNS cache..."
+  sudo dscacheutil -flushcache 2>/dev/null || true
+  sudo killall -HUP mDNSResponder 2>/dev/null || true
+  @echo "✓ All cilo state removed. Run 'cilo cloud login' to start fresh."

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/sharedco/cilo/internal/cloud/tunnel"
@@ -73,6 +74,56 @@ var tunnelStopCmd = &cobra.Command{
 	},
 }
 
+var tunnelCleanCmd = &cobra.Command{
+	Use:   "clean",
+	Short: "Kill all tunnel processes and clean up state",
+	Long: `Forcefully clean up all tunnel state. Use when tunnel is stuck or port conflicts occur.
+
+This command:
+  1. Kills ALL cilo tunnel daemon processes
+  2. Removes tunnel state files (~/.cilo/tunnel/)
+  3. Removes any stale utun interfaces
+
+Requires sudo.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("tunnel clean requires root privileges.\n\nRun: sudo cilo tunnel clean")
+		}
+
+		fmt.Println("Cleaning up tunnel state...")
+
+		fmt.Print("  → Killing tunnel processes... ")
+		killCmd := exec.Command("pkill", "-9", "-f", "cilo tunnel")
+		killCmd.Run()
+		fmt.Println("done")
+
+		fmt.Print("  → Removing state files... ")
+		tunnelDir, err := tunnel.DaemonDir()
+		if err == nil {
+			os.RemoveAll(tunnelDir)
+		}
+		fmt.Println("done")
+
+		fmt.Print("  → Cleaning up interfaces... ")
+		for i := 0; i < 20; i++ {
+			ifname := fmt.Sprintf("utun%d", i)
+			checkCmd := exec.Command("ifconfig", ifname)
+			output, err := checkCmd.Output()
+			if err != nil {
+				continue
+			}
+			if strings.Contains(string(output), "10.225.0.") {
+				exec.Command("ifconfig", ifname, "down").Run()
+			}
+		}
+		fmt.Println("done")
+
+		fmt.Println("✓ Tunnel cleaned up")
+		fmt.Println("\nYou can now run: sudo cilo cloud up <name>")
+		return nil
+	},
+}
+
 var tunnelDaemonCmd = &cobra.Command{
 	Use:    "daemon",
 	Short:  "Run the tunnel daemon (internal use)",
@@ -96,11 +147,72 @@ var tunnelDaemonCmd = &cobra.Command{
 	},
 }
 
+var cleanCmd = &cobra.Command{
+	Use:   "clean",
+	Short: "Remove all cilo state from this machine",
+	Long: `Nuclear clean - removes ALL cilo state from this machine:
+
+  - Tunnel processes and state
+  - Cloud authentication
+  - DNS configuration
+  - Local environment state
+
+Requires sudo. Use this for a completely fresh start.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if os.Geteuid() != 0 {
+			return fmt.Errorf("clean requires root privileges.\n\nRun: sudo cilo clean")
+		}
+
+		fmt.Println("Removing all cilo state...")
+
+		fmt.Print("  → Killing tunnel processes... ")
+		exec.Command("pkill", "-9", "-f", "cilo tunnel").Run()
+		fmt.Println("done")
+
+		fmt.Print("  → Removing tunnel state... ")
+		tunnelDir, _ := tunnel.DaemonDir()
+		os.RemoveAll(tunnelDir)
+		fmt.Println("done")
+
+		home, _ := os.UserHomeDir()
+		ciloDir := home + "/.cilo"
+
+		fmt.Print("  → Removing cloud auth... ")
+		os.Remove(ciloDir + "/cloud-auth.json")
+		fmt.Println("done")
+
+		fmt.Print("  → Removing state... ")
+		os.Remove(ciloDir + "/state.json")
+		fmt.Println("done")
+
+		fmt.Print("  → Removing DNS config... ")
+		os.RemoveAll(ciloDir + "/dns")
+		fmt.Println("done")
+
+		fmt.Print("  → Removing local environments... ")
+		os.RemoveAll(ciloDir + "/envs")
+		fmt.Println("done")
+
+		fmt.Print("  → Flushing DNS cache... ")
+		exec.Command("dscacheutil", "-flushcache").Run()
+		exec.Command("killall", "-HUP", "mDNSResponder").Run()
+		fmt.Println("done")
+
+		fmt.Println("✓ All cilo state removed")
+		fmt.Println("\nTo start fresh:")
+		fmt.Println("  cilo cloud login --server <url>")
+		fmt.Println("  sudo cilo cloud up <name>")
+		return nil
+	},
+}
+
 func init() {
 	tunnelCmd.AddCommand(tunnelStatusCmd)
 	tunnelCmd.AddCommand(tunnelStopCmd)
+	tunnelCmd.AddCommand(tunnelCleanCmd)
 	tunnelCmd.AddCommand(tunnelDaemonCmd)
 	rootCmd.AddCommand(tunnelCmd)
+	rootCmd.AddCommand(cleanCmd)
 }
 
 func StartTunnelDaemon(cfg *tunnel.DaemonConfig) error {

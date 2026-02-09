@@ -32,13 +32,19 @@ if ! command -v wg &> /dev/null; then
   fi
 fi
 
-# Generate WireGuard keys
+# Generate WireGuard keys (reuse existing if available)
 WG_PRIVATE_KEY=""
 WG_PUBLIC_KEY=""
 if command -v wg &> /dev/null; then
-  WG_PRIVATE_KEY=$(wg genkey)
-  WG_PUBLIC_KEY=$(echo "$WG_PRIVATE_KEY" | wg pubkey)
-  echo "✓ Generated WireGuard keys"
+  if [ -f /etc/cilo/agent-private.key ]; then
+    WG_PRIVATE_KEY=$(sudo cat /etc/cilo/agent-private.key)
+    WG_PUBLIC_KEY=$(echo "$WG_PRIVATE_KEY" | wg pubkey)
+    echo "✓ Reusing existing WireGuard keys"
+  else
+    WG_PRIVATE_KEY=$(wg genkey)
+    WG_PUBLIC_KEY=$(echo "$WG_PRIVATE_KEY" | wg pubkey)
+    echo "✓ Generated new WireGuard keys"
+  fi
 else
   echo "⚠ WireGuard tools not available - will generate keys later"
 fi
