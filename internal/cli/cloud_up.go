@@ -75,6 +75,10 @@ func runCloudUp(cmd *cobra.Command, args []string) error {
 		spec.Project = filepath.Base(absPath)
 	}
 
+	if spec.Project == "" {
+		spec.Project = filepath.Base(absPath)
+	}
+
 	fmt.Printf("Found %s project (%d services): %s\n",
 		spec.Source, len(spec.Services), spec.SourcePath)
 
@@ -100,10 +104,16 @@ func runCloudUpCI(envName string, spec *engine.EnvironmentSpec, timeout int) err
 	}
 
 	ctx := context.Background()
+
+	format := string(spec.Source)
+	if format == "compose" {
+		format = "docker-compose"
+	}
+
 	resp, err := client.CreateEnvironment(ctx, cloud.CreateEnvironmentRequest{
 		Name:      envName,
 		Project:   spec.Project,
-		Format:    string(spec.Source),
+		Format:    format,
 		Source:    "ci",
 		CIMode:    true,
 		CITimeout: timeout,

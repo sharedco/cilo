@@ -284,8 +284,42 @@ func (s *Server) handleGetEnvironment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDestroyEnvironment(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": "not yet implemented",
+	ctx := r.Context()
+	envID := chi.URLParam(r, "envID")
+
+	if envID == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "environment ID is required",
+		})
+		return
+	}
+
+	env, err := s.store.GetEnvironment(ctx, envID)
+	if err != nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{
+			"error": "environment not found",
+		})
+		return
+	}
+
+	if env.MachineID != nil && *env.MachineID != "" {
+		if err := s.store.AssignMachine(ctx, *env.MachineID, ""); err != nil {
+			fmt.Printf("Warning: failed to unassign machine: %v\n", err)
+		}
+		if err := s.store.UpdateMachineStatus(ctx, *env.MachineID, "ready"); err != nil {
+			fmt.Printf("Warning: failed to update machine status: %v\n", err)
+		}
+	}
+
+	if err := s.store.DeleteEnvironment(ctx, envID); err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "failed to delete environment: " + err.Error(),
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]string{
+		"message": "environment destroyed",
 	})
 }
 
