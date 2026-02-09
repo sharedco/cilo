@@ -186,10 +186,16 @@ func runCloudUpMain(envName, absPath string, spec *engine.EnvironmentSpec, build
 	}
 
 	fmt.Println("→ Creating environment on Cilo Cloud...")
+
+	format := string(spec.Source)
+	if format == "compose" {
+		format = "docker-compose"
+	}
+
 	createReq := cloud.CreateEnvironmentRequest{
 		Name:    envName,
 		Project: spec.Project,
-		Format:  string(spec.Source),
+		Format:  format,
 		Source:  "cli",
 		CIMode:  false,
 	}
