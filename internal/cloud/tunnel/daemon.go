@@ -87,9 +87,10 @@ func SaveDaemonConfig(cfg *DaemonConfig) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
+	os.Chmod(dir, 0755)
 
 	path, err := configPath()
 	if err != nil {
@@ -101,7 +102,10 @@ func SaveDaemonConfig(cfg *DaemonConfig) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0600)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0644)
 }
 
 // LoadDaemonConfig loads the daemon configuration
