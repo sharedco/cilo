@@ -324,7 +324,24 @@ func (s *Server) handleDestroyEnvironment(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Stop containers on the agent first
 	if env.MachineID != nil && *env.MachineID != "" {
+		machine, err := s.store.GetMachine(ctx, *env.MachineID)
+		if err == nil && machine != nil {
+			agentHost := machine.WGEndpoint
+			if agentHost == "" {
+				agentHost = machine.PublicIP
+			}
+			agentAddr := fmt.Sprintf("http://%s:8081", agentHost)
+			agentClient := agent.NewClient(agentAddr)
+
+			if downErr := agentClient.EnvironmentDown(ctx, env.Name); downErr != nil {
+				fmt.Printf("Warning: failed to stop environment containers: %v\n", downErr)
+			} else {
+				fmt.Printf("Environment containers stopped on agent\n")
+			}
+		}
+
 		if err := s.store.AssignMachine(ctx, *env.MachineID, ""); err != nil {
 			fmt.Printf("Warning: failed to unassign machine: %v\n", err)
 		}
