@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -258,6 +259,28 @@ func (d *Daemon) Run() error {
 	if err := d.manager.AddPeer(d.config.ServerPubKey, d.config.ServerEndpoint, d.config.AllowedIPs, 25*time.Second); err != nil {
 		RemoveInterface(actualName)
 		return fmt.Errorf("add peer: %w", err)
+	}
+
+	// Add routes for AllowedIPs CIDRs
+	for _, cidr := range d.config.AllowedIPs {
+		// Skip the host's own /32 address - it's not a routeable destination
+		if strings.HasSuffix(cidr, "/32") {
+			continue
+		}
+
+		// Parse the local address to use as gateway
+		ip, _, err := net.ParseCIDR(d.config.Address)
+		if err != nil {
+			fmt.Printf("Warning: could not parse local address %s: %v\n", d.config.Address, err)
+			continue
+		}
+
+		if err := AddRoute(actualName, cidr, ip); err != nil {
+			fmt.Printf("Warning: failed to add route for %s: %v\n", cidr, err)
+			// Continue - WireGuard might still work for some traffic
+		} else {
+			fmt.Printf("  ✓ Added route: %s via %s\n", cidr, ip.String())
+		}
 	}
 
 	// Save state

@@ -321,7 +321,7 @@ func (m *EnvironmentManager) getServiceIPs(ctx context.Context, workspacePath, e
 		}
 
 		// Get container IP using docker inspect
-		ip, err := m.getContainerIP(ctx, container.Name)
+		ip, err := m.getContainerIP(ctx, container.Name, envName)
 		if err != nil {
 			log.Printf("Warning: failed to get IP for %s: %v", container.Name, err)
 			continue
@@ -333,10 +333,12 @@ func (m *EnvironmentManager) getServiceIPs(ctx context.Context, workspacePath, e
 	return services, nil
 }
 
-// getContainerIP retrieves the IP address of a container
-func (m *EnvironmentManager) getContainerIP(ctx context.Context, containerName string) (string, error) {
+// getContainerIP retrieves the IP address of a container from the Cilo network
+func (m *EnvironmentManager) getContainerIP(ctx context.Context, containerName, envName string) (string, error) {
+	ciloNetworkName := fmt.Sprintf("cilo_%s", envName)
+
 	cmd := exec.CommandContext(ctx, "docker", "inspect",
-		"--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+		"--format", fmt.Sprintf("{{range .NetworkSettings.Networks}}{{if eq .Name %q}}{{.IPAddress}}{{end}}{{end}}", ciloNetworkName),
 		containerName)
 
 	var stdout bytes.Buffer
@@ -348,7 +350,7 @@ func (m *EnvironmentManager) getContainerIP(ctx context.Context, containerName s
 
 	ip := strings.TrimSpace(stdout.String())
 	if ip == "" {
-		return "", fmt.Errorf("no IP address found")
+		return "", fmt.Errorf("no IP address found on network %s", ciloNetworkName)
 	}
 
 	return ip, nil

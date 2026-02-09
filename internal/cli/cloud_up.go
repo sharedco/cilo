@@ -19,6 +19,7 @@ import (
 	"github.com/sharedco/cilo/internal/engine"
 	"github.com/sharedco/cilo/internal/models"
 	_ "github.com/sharedco/cilo/internal/parsers"
+	"github.com/sharedco/cilo/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -445,49 +446,61 @@ func configureCloudDNS(envName, project string, env *cloud.Environment) error {
 		}
 	}
 
-	if len(hostsEntries) > 0 {
-		state := &models.State{
+	if len(hostsEntries) == 0 {
+		return nil
+	}
+
+	st, err := state.LoadState()
+	if err != nil {
+		st = &models.State{
 			Version: 2,
 			Hosts:   make(map[string]*models.Host),
 		}
+	}
 
-		hostID := "cloud"
-		if state.Hosts[hostID] == nil {
-			state.Hosts[hostID] = &models.Host{
-				Environments: make(map[string]*models.Environment),
+	hostID := "cloud"
+	if st.Hosts[hostID] == nil {
+		st.Hosts[hostID] = &models.Host{
+			ID:           hostID,
+			Provider:     "wireguard",
+			Environments: make(map[string]*models.Environment),
+		}
+	}
+
+	cloudEnv := &models.Environment{
+		Name:      envName,
+		Project:   project,
+		DNSSuffix: dnsSuffix,
+		Services:  make(map[string]*models.Service),
+	}
+
+	if env != nil {
+		for _, svc := range env.Services {
+			cloudEnv.Services[svc.Name] = &models.Service{
+				Name:      svc.Name,
+				IP:        svc.IP,
+				IsIngress: false,
 			}
 		}
+	}
 
-		cloudEnv := &models.Environment{
-			Name:      envName,
-			Project:   project,
-			DNSSuffix: dnsSuffix,
-			Services:  make(map[string]*models.Service),
+	envKey := fmt.Sprintf("%s/%s", project, envName)
+	st.Hosts[hostID].Environments[envKey] = cloudEnv
+
+	if err := state.SaveState(st); err != nil {
+		return fmt.Errorf("failed to save state: %w", err)
+	}
+
+	if err := dns.SetupSystemResolver(st); err != nil {
+		fmt.Printf("  ⚠ Could not setup system resolver: %v\n", err)
+	}
+
+	if err := dns.UpdateDNSFromState(st); err != nil {
+		fmt.Println("  → Manual DNS configuration required. Add these to /etc/hosts:")
+		for _, entry := range hostsEntries {
+			fmt.Printf("     %s\n", entry)
 		}
-
-		if env != nil {
-			for _, svc := range env.Services {
-				cloudEnv.Services[svc.Name] = &models.Service{
-					Name:      svc.Name,
-					IP:        svc.IP,
-					IsIngress: false,
-				}
-			}
-		}
-
-		state.Hosts[hostID].Environments[envName] = cloudEnv
-
-		if err := dns.SetupSystemResolver(state); err != nil {
-			fmt.Printf("  ⚠ Could not setup system resolver: %v\n", err)
-		}
-
-		if err := dns.UpdateDNSFromState(state); err != nil {
-			fmt.Println("  → Manual DNS configuration required. Add these to /etc/hosts:")
-			for _, entry := range hostsEntries {
-				fmt.Printf("     %s\n", entry)
-			}
-			return err
-		}
+		return err
 	}
 
 	return nil
