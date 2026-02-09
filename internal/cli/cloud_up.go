@@ -263,7 +263,7 @@ func runCloudUpMain(envName, absPath string, spec *engine.EnvironmentSpec, build
 
 	wgReq := cloud.WireGuardExchangeRequest{
 		EnvironmentID: envID,
-		ClientPubKey:  keyPair.PublicKey,
+		PublicKey:     keyPair.PublicKey,
 	}
 
 	wgResp, err := client.WireGuardExchange(ctx, wgReq)

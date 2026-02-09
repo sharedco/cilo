@@ -285,7 +285,7 @@ func TestClient_WireGuardExchange(t *testing.T) {
 			t.Fatalf("failed to decode request: %v", err)
 		}
 
-		if req.ClientPubKey == "" {
+		if req.PublicKey == "" {
 			t.Error("expected client public key in request")
 		}
 
@@ -305,7 +305,7 @@ func TestClient_WireGuardExchange(t *testing.T) {
 	ctx := context.Background()
 	resp, err := client.WireGuardExchange(ctx, cloud.WireGuardExchangeRequest{
 		EnvironmentID: "env-123",
-		ClientPubKey:  "client-pubkey-456",
+		PublicKey:     "client-pubkey-456",
 	})
 
 	if err != nil {
