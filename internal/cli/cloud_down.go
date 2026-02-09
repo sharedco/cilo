@@ -73,6 +73,20 @@ func runCloudDown(cmd *cobra.Command, args []string) error {
 }
 
 func teardownWireGuard(envName string) error {
+	state, err := tunnel.LoadDaemonState()
+	if err == nil && state.Running {
+		if state.EnvironmentID == envName || strings.Contains(state.EnvironmentID, envName) {
+			fmt.Println("Stopping WireGuard tunnel daemon...")
+			if err := tunnel.StopDaemon(); err != nil {
+				fmt.Printf("  Warning: %v\n", err)
+			} else {
+				fmt.Println("  ✓ Tunnel daemon stopped")
+			}
+		}
+	}
+
+	tunnel.ClearDaemonState()
+
 	interfaceNames := []string{
 		fmt.Sprintf("cilo-%s", envName),
 		"cilo0",

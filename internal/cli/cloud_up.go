@@ -252,7 +252,8 @@ func runCloudUpMain(envName, absPath string, spec *engine.EnvironmentSpec, build
 				fmt.Println("    ✓ Environment destroyed")
 			}
 		}
-		_ = tunnel.RemoveInterface("cilo0")
+		tunnel.StopDaemon()
+		tunnel.ClearDaemonState()
 	}
 
 	fmt.Println("→ Syncing workspace to remote machine...")
@@ -310,24 +311,29 @@ func runCloudUpMain(envName, absPath string, spec *engine.EnvironmentSpec, build
 
 	fmt.Printf("  ✓ Keys exchanged (assigned IP: %s)\n", wgResp.AssignedIP)
 
-	fmt.Println("→ Configuring local WireGuard interface...")
-	tunCfg := tunnel.Config{
-		Interface:  "cilo0",
-		ListenPort: 51820,
-		Address:    wgResp.AssignedIP + "/32",
+	fmt.Println("→ Starting WireGuard tunnel daemon...")
+	daemonCfg := &tunnel.DaemonConfig{
+		Interface:      "cilo0",
+		PrivateKey:     keyPair.PrivateKey,
+		Address:        wgResp.AssignedIP + "/32",
+		ListenPort:     51821,
+		ServerPubKey:   wgResp.ServerPubKey,
+		ServerEndpoint: wgResp.ServerEndpoint,
+		AllowedIPs:     wgResp.AllowedIPs,
+		EnvironmentID:  envID,
 	}
 
-	tun, err := tunnel.New(tunCfg)
-	if err != nil {
-		cleanup("tunnel creation failed")
-		return fmt.Errorf("create tunnel: %w", err)
+	if err := StartTunnelDaemon(daemonCfg); err != nil {
+		cleanup("tunnel daemon failed to start")
+		return fmt.Errorf("start tunnel daemon: %w", err)
 	}
 
-	if err := setupWireGuardInterface(tun, keyPair.PrivateKey, wgResp); err != nil {
-		cleanup("WireGuard setup failed")
-		return fmt.Errorf("setup WireGuard: %w", err)
+	state, _ := tunnel.GetDaemonStatus()
+	interfaceName := "cilo0"
+	if state != nil && state.Interface != "" {
+		interfaceName = state.Interface
 	}
-	fmt.Println("  ✓ WireGuard interface configured (cilo0)")
+	fmt.Printf("  ✓ WireGuard tunnel daemon started (%s)\n", interfaceName)
 
 	fmt.Println("→ Waiting for environment to be ready...")
 	if err := waitForEnvironmentReady(ctx, client, envID); err != nil {
@@ -356,7 +362,11 @@ func runCloudUpMain(envName, absPath string, spec *engine.EnvironmentSpec, build
 	if env != nil && env.Subnet != "" {
 		fmt.Printf("Subnet: %s\n", env.Subnet)
 	}
-	fmt.Printf("WireGuard: cilo0 (%s)\n", wgResp.AssignedIP)
+	if state != nil && state.Interface != "" {
+		fmt.Printf("WireGuard: %s (%s)\n", state.Interface, wgResp.AssignedIP)
+	} else {
+		fmt.Printf("WireGuard: %s\n", wgResp.AssignedIP)
+	}
 
 	fmt.Println("\nService URLs:")
 	dnsSuffix := ".test"
@@ -377,43 +387,6 @@ func runCloudUpMain(envName, absPath string, spec *engine.EnvironmentSpec, build
 	fmt.Printf("  curl http://api.%s.test\n", envName)
 	fmt.Println("\nTo destroy:")
 	fmt.Printf("  cilo cloud destroy %s\n", envName)
-
-	return nil
-}
-
-func setupWireGuardInterface(tun *tunnel.Tunnel, privateKey string, wgResp *cloud.WireGuardExchangeResponse) error {
-	actualName, err := tunnel.CreateInterface(tun.Interface)
-	if err != nil {
-		return fmt.Errorf("create interface: %w", err)
-	}
-	tun.Interface = actualName
-
-	manager, err := tunnel.NewManager(tun.Interface)
-	if err != nil {
-		tunnel.RemoveInterface(tun.Interface)
-		return fmt.Errorf("create manager: %w", err)
-	}
-	defer manager.Close()
-
-	if err := manager.Configure(privateKey, tun.ListenPort); err != nil {
-		tunnel.RemoveInterface(tun.Interface)
-		return fmt.Errorf("configure: %w", err)
-	}
-
-	if err := tunnel.AddAddress(tun.Interface, tun.Address); err != nil {
-		tunnel.RemoveInterface(tun.Interface)
-		return fmt.Errorf("add address: %w", err)
-	}
-
-	if err := tunnel.SetInterfaceUp(tun.Interface); err != nil {
-		tunnel.RemoveInterface(tun.Interface)
-		return fmt.Errorf("set interface up: %w", err)
-	}
-
-	if err := manager.AddPeer(wgResp.ServerPubKey, wgResp.ServerEndpoint, wgResp.AllowedIPs, 25*time.Second); err != nil {
-		tunnel.RemoveInterface(tun.Interface)
-		return fmt.Errorf("add peer: %w", err)
-	}
 
 	return nil
 }
