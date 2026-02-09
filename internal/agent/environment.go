@@ -17,6 +17,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/sharedco/cilo/internal/compose"
+	"github.com/sharedco/cilo/internal/models"
 )
 
 // EnvironmentManager handles Docker Compose operations
@@ -56,6 +59,11 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 		networkName := fmt.Sprintf("cilo_%s", req.EnvName)
 		if err := m.createNetwork(ctx, networkName, req.Subnet); err != nil {
 			log.Printf("Warning: failed to create network (may already exist): %v", err)
+		}
+
+		// Generate docker-compose override to attach containers to Cilo network
+		if err := m.generateOverride(workspacePath, req.EnvName, req.Subnet); err != nil {
+			log.Printf("Warning: failed to generate override.yml: %v", err)
 		}
 	}
 
@@ -285,6 +293,28 @@ func (m *EnvironmentManager) createNetwork(ctx context.Context, name, subnet str
 	}
 
 	log.Printf("Created Docker network %s with subnet %s", name, subnet)
+	return nil
+}
+
+func (m *EnvironmentManager) generateOverride(workspacePath, envName, subnet string) error {
+	ciloDir := filepath.Join(workspacePath, ".cilo")
+	if err := os.MkdirAll(ciloDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .cilo directory: %w", err)
+	}
+
+	overridePath := filepath.Join(ciloDir, "override.yml")
+	baseFiles := []string{filepath.Join(workspacePath, "docker-compose.yml")}
+
+	env := &models.Environment{
+		Name:   envName,
+		Subnet: subnet,
+	}
+
+	if err := compose.Transform(env, baseFiles, overridePath, ".test"); err != nil {
+		return fmt.Errorf("failed to transform compose: %w", err)
+	}
+
+	log.Printf("Generated override.yml for %s with network cilo_%s", envName, envName)
 	return nil
 }
 
