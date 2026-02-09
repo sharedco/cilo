@@ -18,7 +18,7 @@ type Machine struct {
 	PrivateIP    string
 	WGPublicKey  string
 	WGEndpoint   string
-	Status       string // "provisioning", "ready", "assigned", "draining", "destroying"
+	Status       string // "provisioning", "ready", "error", "destroyed"
 	AssignedEnv  string // Environment ID if assigned
 	SSHHost      string // For manual provider
 	SSHUser      string
@@ -28,14 +28,12 @@ type Machine struct {
 	LastHealthAt time.Time
 }
 
-// MachineStatus constants
+// MachineStatus constants (must match database constraint)
 const (
 	MachineStatusProvisioning = "provisioning"
 	MachineStatusReady        = "ready"
-	MachineStatusAssigned     = "assigned"
-	MachineStatusDraining     = "draining"
-	MachineStatusDestroying   = "destroying"
-	MachineStatusFailed       = "failed"
+	MachineStatusError        = "error"
+	MachineStatusDestroyed    = "destroyed"
 )
 
 // ProvisionConfig contains configuration for provisioning a new machine

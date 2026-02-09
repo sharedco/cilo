@@ -91,10 +91,12 @@ func (s *Server) handleRevokeAPIKey(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateEnvironmentRequest struct {
-	Name    string `json:"name"`
-	Project string `json:"project"`
-	Format  string `json:"format"`
-	Source  string `json:"source"`
+	Name      string `json:"name"`
+	Project   string `json:"project"`
+	Format    string `json:"format"`
+	Source    string `json:"source"`
+	CIMode    bool   `json:"ci_mode"`
+	CITimeout int    `json:"ci_timeout"`
 }
 
 type CreateEnvironmentResponse struct {
@@ -208,11 +210,14 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := s.store.UpdateMachineStatus(ctx, availableMachine.ID, "assigned"); err != nil {
+	if err := s.store.UpdateMachineStatus(ctx, availableMachine.ID, "provisioning"); err != nil {
 		fmt.Printf("Warning: failed to update machine status: %v\n", err)
 	}
 
-	go s.provisionEnvironment(env, availableMachine)
+	// Only auto-provision if NOT in CI mode. In CI mode, client will sync first then call /sync
+	if !req.CIMode {
+		go s.provisionEnvironment(env, availableMachine)
+	}
 
 	resp := CreateEnvironmentResponse{
 		Environment: &store.Environment{
@@ -253,6 +258,7 @@ func (s *Server) provisionEnvironment(env *store.Environment, machine *store.Mac
 
 	upResp, err := agentClient.EnvironmentUp(ctx, upReq)
 	if err != nil {
+		fmt.Printf("Error: agent EnvironmentUp failed: %v\n", err)
 		if updateErr := s.store.UpdateEnvironmentStatus(ctx, env.ID, "error"); updateErr != nil {
 			fmt.Printf("Error: failed to update environment status to error: %v\n", updateErr)
 		}
@@ -329,9 +335,35 @@ func (s *Server) handleDestroyEnvironment(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleSyncEnvironment(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": "not yet implemented",
-	})
+	ctx := r.Context()
+	envID := chi.URLParam(r, "envID")
+
+	if envID == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "environment ID required"})
+		return
+	}
+
+	env, err := s.store.GetEnvironment(ctx, envID)
+	if err != nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{"error": "environment not found"})
+		return
+	}
+
+	if env.MachineID == nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "environment has no machine assigned"})
+		return
+	}
+
+	machine, err := s.store.GetMachine(ctx, *env.MachineID)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get machine"})
+		return
+	}
+
+	// Trigger provisioning now that workspace is synced
+	go s.provisionEnvironment(env, machine)
+
+	respondJSON(w, http.StatusOK, map[string]string{"message": "sync complete, provisioning started"})
 }
 
 // WireGuard handlers
