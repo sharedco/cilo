@@ -54,24 +54,25 @@ services:
 	}
 
 	envName := "e2e-test-" + strings.ReplaceAll(time.Now().Format("20060102-150405"), ":", "")
+	projectName := "e2e-test-project"
 
 	// Ensure cleanup happens
 	defer func() {
 		t.Log("Cleaning up environment...")
-		cmd := exec.Command(ciloBinary, "destroy", envName, "--force")
+		cmd := exec.Command(ciloBinary, "destroy", envName, "--force", "--project", projectName)
 		_ = cmd.Run()
 	}()
 
 	// Test cilo create then up
 	t.Run("CreateEnvironment", func(t *testing.T) {
-		cmd := exec.Command(ciloBinary, "create", envName, "--from", dir)
+		cmd := exec.Command(ciloBinary, "create", envName, "--from", dir, "--project", projectName)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cilo create failed: %v\nOutput: %s", err, output)
 		}
 		t.Logf("Environment created: %s", output)
 
-		cmd = exec.Command(ciloBinary, "up", envName)
+		cmd = exec.Command(ciloBinary, "up", envName, "--project", projectName)
 		output, err = cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cilo up failed: %v\nOutput: %s", err, output)
@@ -81,7 +82,7 @@ services:
 
 	// Test cilo list
 	t.Run("ListEnvironments", func(t *testing.T) {
-		cmd := exec.Command(ciloBinary, "list")
+		cmd := exec.Command(ciloBinary, "list", "--project", projectName)
 		output, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("cilo list failed: %v", err)
@@ -95,7 +96,7 @@ services:
 
 	// Test cilo down
 	t.Run("StopEnvironment", func(t *testing.T) {
-		cmd := exec.Command(ciloBinary, "down", envName)
+		cmd := exec.Command(ciloBinary, "down", envName, "--project", projectName)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cilo down failed: %v\nOutput: %s", err, output)
@@ -105,7 +106,7 @@ services:
 
 	// Test cilo destroy
 	t.Run("DestroyEnvironment", func(t *testing.T) {
-		cmd := exec.Command(ciloBinary, "destroy", envName, "--force")
+		cmd := exec.Command(ciloBinary, "destroy", envName, "--force", "--project", projectName)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cilo destroy failed: %v\nOutput: %s", err, output)
@@ -115,7 +116,7 @@ services:
 
 	// Verify environment is gone
 	t.Run("VerifyDestroyed", func(t *testing.T) {
-		cmd := exec.Command(ciloBinary, "list")
+		cmd := exec.Command(ciloBinary, "list", "--project", projectName)
 		output, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("cilo list failed: %v", err)
@@ -156,22 +157,23 @@ services:
 	timestamp := time.Now().Format("20060102-150405")
 	env1 := "e2e-parallel-1-" + timestamp
 	env2 := "e2e-parallel-2-" + timestamp
+	parallelProject := "e2e-parallel-project"
 
 	// Ensure cleanup
 	defer func() {
-		exec.Command(ciloBinary, "destroy", env1, "--force").Run()
-		exec.Command(ciloBinary, "destroy", env2, "--force").Run()
+		exec.Command(ciloBinary, "destroy", env1, "--force", "--project", parallelProject).Run()
+		exec.Command(ciloBinary, "destroy", env2, "--force", "--project", parallelProject).Run()
 	}()
 
 	// Create first environment
 	t.Run("CreateFirstEnv", func(t *testing.T) {
-		cmd := exec.Command(ciloBinary, "create", env1, "--from", dir)
+		cmd := exec.Command(ciloBinary, "create", env1, "--from", dir, "--project", parallelProject)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cilo create failed for %s: %v\nOutput: %s", env1, err, output)
 		}
 
-		cmd = exec.Command(ciloBinary, "up", env1)
+		cmd = exec.Command(ciloBinary, "up", env1, "--project", parallelProject)
 		output, err = cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cilo up failed for %s: %v\nOutput: %s", env1, err, output)
@@ -180,13 +182,13 @@ services:
 
 	// Create second environment
 	t.Run("CreateSecondEnv", func(t *testing.T) {
-		cmd := exec.Command(ciloBinary, "create", env2, "--from", dir)
+		cmd := exec.Command(ciloBinary, "create", env2, "--from", dir, "--project", parallelProject)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cilo create failed for %s: %v\nOutput: %s", env2, err, output)
 		}
 
-		cmd = exec.Command(ciloBinary, "up", env2)
+		cmd = exec.Command(ciloBinary, "up", env2, "--project", parallelProject)
 		output, err = cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cilo up failed for %s: %v\nOutput: %s", env2, err, output)
@@ -195,7 +197,7 @@ services:
 
 	// Verify both exist
 	t.Run("VerifyBothExist", func(t *testing.T) {
-		cmd := exec.Command(ciloBinary, "list")
+		cmd := exec.Command(ciloBinary, "list", "--project", parallelProject)
 		output, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("cilo list failed: %v", err)
@@ -212,14 +214,12 @@ services:
 
 	// Cleanup
 	t.Run("DestroyBoth", func(t *testing.T) {
-		// Destroy first
-		cmd := exec.Command(ciloBinary, "destroy", env1, "--force")
+		cmd := exec.Command(ciloBinary, "destroy", env1, "--force", "--project", parallelProject)
 		if err := cmd.Run(); err != nil {
 			t.Errorf("failed to destroy %s: %v", env1, err)
 		}
 
-		// Destroy second
-		cmd = exec.Command(ciloBinary, "destroy", env2, "--force")
+		cmd = exec.Command(ciloBinary, "destroy", env2, "--force", "--project", parallelProject)
 		if err := cmd.Run(); err != nil {
 			t.Errorf("failed to destroy %s: %v", env2, err)
 		}
@@ -239,6 +239,7 @@ func TestDetectProject(t *testing.T) {
 
 	t.Run("ComposeFile", func(t *testing.T) {
 		dir := t.TempDir()
+		detectProject := "e2e-detect-project"
 
 		composeContent := `
 services:
@@ -250,18 +251,16 @@ services:
 			t.Fatal(err)
 		}
 
-		// Test detection (this would be a cilo detect command if it exists)
-		// For now, just verify cilo up can detect it
 		envName := "e2e-detect-" + time.Now().Format("20060102-150405")
-		defer exec.Command(ciloBinary, "destroy", envName, "--force").Run()
+		defer exec.Command(ciloBinary, "destroy", envName, "--force", "--project", detectProject).Run()
 
-		cmd := exec.Command(ciloBinary, "create", envName, "--from", dir)
+		cmd := exec.Command(ciloBinary, "create", envName, "--from", dir, "--project", detectProject)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cilo create failed: %v\nOutput: %s", err, output)
 		}
 
-		cmd = exec.Command(ciloBinary, "up", envName)
+		cmd = exec.Command(ciloBinary, "up", envName, "--project", detectProject)
 		output, err = cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cilo up failed: %v\nOutput: %s", err, output)

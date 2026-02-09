@@ -18,19 +18,22 @@ ENV2="verify-env2"
 # Build cilo
 echo "Building cilo..."
 SCRIPT_DIR="$(dirname "$0")"
-cd "$SCRIPT_DIR/../../cilo"
-go build -o cilo
-CILO="$(pwd)/cilo"
 cd "$SCRIPT_DIR/../.."
+go build -o cilo ./cmd/cilo
+CILO="$(pwd)/cilo"
 
 # Cleanup function
 cleanup() {
     echo ""
     echo "Cleaning up..."
-    $CILO destroy $ENV1 --force --project $PROJECT 2>/dev/null || true
-    $CILO destroy $ENV2 --force --project $PROJECT 2>/dev/null || true
     docker stop cilo_shared_${PROJECT}_elasticsearch 2>/dev/null || true
     docker rm cilo_shared_${PROJECT}_elasticsearch 2>/dev/null || true
+    docker stop cilo_shared_${PROJECT}_app 2>/dev/null || true
+    docker rm cilo_shared_${PROJECT}_app 2>/dev/null || true
+    $CILO destroy $ENV1 --force --project $PROJECT 2>/dev/null || true
+    $CILO destroy $ENV2 --force --project $PROJECT 2>/dev/null || true
+    docker network rm cilo_${ENV1} 2>/dev/null || true
+    docker network rm cilo_${ENV2} 2>/dev/null || true
 }
 
 trap cleanup EXIT

@@ -5,8 +5,10 @@
 package vm
 
 import (
-	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"os"
@@ -95,8 +97,22 @@ func generateTestHostKey() (ssh.Signer, error) {
 }
 
 func generateTestClientKey() ([]byte, error) {
-	key := []byte("test-key-data")
-	return key, nil
+	_, privateKey, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		return nil, err
+	}
+
+	privateKeyBytes, err := x509.MarshalPKCS8PrivateKey(privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	pemBlock := &pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: privateKeyBytes,
+	}
+
+	return pem.EncodeToMemory(pemBlock), nil
 }
 
 func handleChannel(t *testing.T, newChannel ssh.NewChannel) {
@@ -130,10 +146,22 @@ func TestSSHClientClose(t *testing.T) {
 	host, port, _, cleanup := mockSSHServer(t)
 	defer cleanup()
 
+	// Generate a client key for authentication
+	clientKey, err := generateTestClientKey()
+	if err != nil {
+		t.Fatalf("Failed to generate client key: %v", err)
+	}
+
+	signer, err := ssh.ParsePrivateKey(clientKey)
+	if err != nil {
+		t.Fatalf("Failed to parse client key: %v", err)
+	}
+
 	// Create a client config for testing
 	config := &ssh.ClientConfig{
 		User:            "testuser",
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		Timeout:         5 * time.Second,
 	}
 

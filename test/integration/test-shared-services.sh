@@ -23,8 +23,8 @@ echo ""
 # Build cilo first
 echo "Building cilo..."
 SCRIPT_DIR="$(dirname "$0")"
-cd "$SCRIPT_DIR/../../cilo"
-go build -o cilo
+cd "$SCRIPT_DIR/../.."
+go build -o cilo ./cmd/cilo
 echo "✓ Build successful"
 echo ""
 
@@ -34,9 +34,10 @@ echo "(This will take ~90 seconds due to grace period testing)"
 echo ""
 
 export CILO_E2E=1
+export CILO_BINARY="$(pwd)/cilo"
 
 # Run all shared services tests
-go test -tags e2e -v ./tests/e2e -run TestSharedServices -timeout 10m
+go test -tags e2e -v ./test/e2e -run TestSharedServices -timeout 10m
 
 echo ""
 echo "=== Test Suite Complete ==="
