@@ -15,9 +15,9 @@ RUN apk --no-cache add ca-certificates
 
 WORKDIR /app
 
-COPY --from=builder /app/cilo-server .
+COPY --from=builder /app/cilo-server /usr/local/bin/cilo-server
 COPY --from=builder /app/internal/server/store/migrations /app/pkg/store/migrations
 
 EXPOSE 8080
 
-CMD ["./cilo-server", "serve"]
+CMD ["cilo-server", "serve"]
