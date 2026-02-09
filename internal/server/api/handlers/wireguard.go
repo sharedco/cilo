@@ -42,8 +42,8 @@ type ExchangeRequest struct {
 
 // ExchangeResponse represents a WireGuard key exchange response
 type ExchangeResponse struct {
-	MachinePublicKey string   `json:"machine_public_key"`
-	MachineEndpoint  string   `json:"endpoint"`
+	MachinePublicKey string   `json:"server_public_key"`
+	MachineEndpoint  string   `json:"server_endpoint"`
 	AssignedIP       string   `json:"assigned_ip"`
 	AllowedIPs       []string `json:"allowed_ips"`
 }
@@ -92,14 +92,42 @@ func (h *WireGuardHandler) HandleWireGuardExchange(w http.ResponseWriter, r *htt
 		return
 	}
 
-	// TODO: Fetch machine info from database
-	// For now, we'll use placeholder values
-	// In production, this should query the machines table
+	// Fetch machine info from database
+	machine, err := h.store.GetMachine(r.Context(), req.MachineID)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to get machine: " + err.Error(),
+		})
+		return
+	}
+
+	// Generate WireGuard keys if not present
+	if machine.WGPublicKey == "" {
+		keyPair, err := wireguard.GenerateKeyPair()
+		if err != nil {
+			respondJSON(w, http.StatusInternalServerError, map[string]string{
+				"error": "Failed to generate WireGuard keys: " + err.Error(),
+			})
+			return
+		}
+		machine.WGPublicKey = keyPair.PublicKey
+		// Store the public key in the database
+		if err := h.store.UpdateMachineWireGuardKey(r.Context(), req.MachineID, keyPair.PublicKey); err != nil {
+			fmt.Printf("Warning: failed to store machine WireGuard key: %v\n", err)
+		}
+	}
+
+	// Build endpoint from public IP if no WireGuard endpoint set
+	endpoint := machine.WGEndpoint
+	if endpoint == "" {
+		endpoint = machine.PublicIP + ":51820"
+	}
+
 	machineInfo := wireguard.MachineInfo{
 		ID:                req.MachineID,
-		PublicKey:         "MACHINE_PUBLIC_KEY_PLACEHOLDER",
-		Endpoint:          "1.2.3.4:51820",
-		EnvironmentSubnet: "10.224.1.0/24",
+		PublicKey:         machine.WGPublicKey,
+		Endpoint:          endpoint,
+		EnvironmentSubnet: "10.224.0.0/16",
 	}
 
 	// Register peer with the exchange
@@ -228,7 +256,12 @@ func (h *WireGuardHandler) notifyAgentAddPeer(ctx context.Context, machineID, pu
 		return fmt.Errorf("failed to get machine: %w", err)
 	}
 
-	agentAddr := extractAgentAddress(machine.WGEndpoint)
+	// Use WireGuard endpoint if available, otherwise fall back to public IP
+	agentHost := machine.WGEndpoint
+	if agentHost == "" {
+		agentHost = machine.PublicIP
+	}
+	agentAddr := extractAgentAddress(agentHost)
 	agentClient := agent.NewClient(agentAddr)
 
 	allowedIPs := fmt.Sprintf("%s/32,%s", assignedIP, environmentSubnet)
@@ -251,7 +284,12 @@ func (h *WireGuardHandler) notifyAgentRemovePeer(ctx context.Context, machineID,
 		return fmt.Errorf("failed to get machine: %w", err)
 	}
 
-	agentAddr := extractAgentAddress(machine.WGEndpoint)
+	// Use WireGuard endpoint if available, otherwise fall back to public IP
+	agentHost := machine.WGEndpoint
+	if agentHost == "" {
+		agentHost = machine.PublicIP
+	}
+	agentAddr := extractAgentAddress(agentHost)
 	agentClient := agent.NewClient(agentAddr)
 
 	if err := agentClient.RemovePeer(ctx, publicKey); err != nil {
@@ -264,7 +302,12 @@ func (h *WireGuardHandler) notifyAgentRemovePeer(ctx context.Context, machineID,
 // extractAgentAddress extracts the agent address from the WireGuard endpoint
 // WGEndpoint format: "10.225.0.100:51820" -> agent at "http://10.225.0.100:8080"
 // IPv6 format: "[2001:db8::1]:51820" -> agent at "http://[2001:db8::1]:8080"
+// Raw IP format: "10.225.0.100" -> agent at "http://10.225.0.100:8080"
 func extractAgentAddress(wgEndpoint string) string {
+	if wgEndpoint == "" {
+		return ""
+	}
+
 	host, _, err := net.SplitHostPort(wgEndpoint)
 	if err != nil {
 		// If no port is present, use the whole endpoint as the host
@@ -279,7 +322,7 @@ func extractAgentAddress(wgEndpoint string) string {
 	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
 		host = "[" + host + "]"
 	}
-	return fmt.Sprintf("http://%s:8080", host)
+	return fmt.Sprintf("http://%s:8081", host)
 }
 
 // Helper functions

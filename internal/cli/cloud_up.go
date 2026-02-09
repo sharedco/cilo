@@ -504,6 +504,10 @@ func configureCloudDNS(envName, project string, env *cloud.Environment) error {
 
 		state.Hosts[hostID].Environments[envName] = cloudEnv
 
+		if err := dns.SetupSystemResolver(state); err != nil {
+			fmt.Printf("  ⚠ Could not setup system resolver: %v\n", err)
+		}
+
 		if err := dns.UpdateDNSFromState(state); err != nil {
 			fmt.Println("  → Manual DNS configuration required. Add these to /etc/hosts:")
 			for _, entry := range hostsEntries {

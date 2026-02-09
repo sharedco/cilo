@@ -34,7 +34,7 @@ type Config struct {
 // Load creates a Config from environment variables with sensible defaults.
 func Load() *Config {
 	return &Config{
-		ListenAddr:   getEnv("CILO_AGENT_LISTEN", "0.0.0.0:8080"),
+		ListenAddr:   getEnv("CILO_AGENT_LISTEN", "0.0.0.0:8081"),
 		ReadTimeout:  getDuration("CILO_AGENT_READ_TIMEOUT", 30*time.Second),
 		WriteTimeout: getDuration("CILO_AGENT_WRITE_TIMEOUT", 30*time.Second),
 		WorkspaceDir: getEnv("CILO_WORKSPACE_DIR", "/var/cilo/envs"),

@@ -90,6 +90,22 @@ server-up:
 server-down:
   cd deploy/self-host && docker compose down
 
+# Clean up server completely (containers, volumes, envs, agent)
+server-clean:
+  @echo "Cleaning up Cilo Server..."
+  @echo "Stopping containers..."
+  cd deploy/self-host && docker compose down -v 2>/dev/null || true
+  @echo "Removing environment containers..."
+  docker ps -aq --filter "name=-api-" --filter "name=-nginx-" --filter "name=-redis-" | xargs -r docker stop 2>/dev/null || true
+  docker ps -aq --filter "name=-api-" --filter "name=-nginx-" --filter "name=-redis-" | xargs -r docker rm 2>/dev/null || true
+  @echo "Removing environment networks..."
+  docker network ls --format "{{{{.Name}}}}" | grep -E "^[a-f0-9-]{36}_default$$" | xargs -r docker network rm 2>/dev/null || true
+  @echo "Stopping cilo-agent..."
+  sudo pkill -x cilo-agent 2>/dev/null || true
+  @echo "Cleaning up workspace..."
+  sudo rm -rf /var/cilo/envs/* 2>/dev/null || true
+  @echo "✓ Server cleaned up"
+
 # View server logs
 server-logs:
   cd deploy/self-host && docker compose logs -f server

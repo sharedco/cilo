@@ -6,6 +6,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -25,8 +26,18 @@ type Server struct {
 
 func NewServer(cfg *config.Config) (*Server, error) {
 	wgMgr, err := NewWireGuardManager(cfg)
-	if err != nil && cfg.WGPrivateKey != "" {
-		return nil, err
+	if err != nil {
+		if cfg.WGPrivateKey == "" {
+			return nil, fmt.Errorf("WireGuard private key not configured (set CILO_WG_PRIVATE_KEY)")
+		}
+		return nil, fmt.Errorf("failed to initialize WireGuard: %w", err)
+	}
+
+	// Create WireGuard interface on startup (requires root/CAP_NET_ADMIN)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := wgMgr.EnsureInterface(ctx); err != nil {
+		return nil, fmt.Errorf("failed to create WireGuard interface: %w", err)
 	}
 
 	s := &Server{

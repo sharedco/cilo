@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -163,7 +164,7 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request)
 
 	var availableMachine *store.Machine
 	for _, m := range machines {
-		if m.AssignedEnv == nil {
+		if m.AssignedEnv == nil || *m.AssignedEnv == "" {
 			availableMachine = m
 			break
 		}
@@ -241,9 +242,15 @@ func (s *Server) provisionEnvironment(env *store.Environment, machine *store.Mac
 	ctx := context.Background()
 
 	// Use WireGuard endpoint if available, otherwise fall back to public IP
-	agentHost := machine.WGEndpoint
-	if agentHost == "" {
-		agentHost = machine.PublicIP
+	// WGEndpoint format is "ip:port", so extract just the IP
+	agentHost := machine.PublicIP
+	if machine.WGEndpoint != "" {
+		// Extract IP from "ip:port" format
+		if idx := strings.Index(machine.WGEndpoint, ":"); idx != -1 {
+			agentHost = machine.WGEndpoint[:idx]
+		} else {
+			agentHost = machine.WGEndpoint
+		}
 	}
 	agentAddr := fmt.Sprintf("http://%s:8081", agentHost)
 	agentClient := agent.NewClient(agentAddr)
@@ -300,9 +307,25 @@ func (s *Server) handleListEnvironments(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleGetEnvironment(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": "not yet implemented",
-	})
+	ctx := r.Context()
+	envID := chi.URLParam(r, "envID")
+
+	if envID == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "environment ID is required",
+		})
+		return
+	}
+
+	env, err := s.store.GetEnvironment(ctx, envID)
+	if err != nil {
+		respondJSON(w, http.StatusNotFound, map[string]string{
+			"error": "environment not found",
+		})
+		return
+	}
+
+	respondJSON(w, http.StatusOK, env)
 }
 
 func (s *Server) handleDestroyEnvironment(w http.ResponseWriter, r *http.Request) {

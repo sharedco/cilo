@@ -276,6 +276,16 @@ func (s *Store) UpdateMachineStatus(ctx context.Context, id, status string) erro
 	return err
 }
 
+// UpdateMachineWireGuardKey updates the WireGuard public key of a machine
+func (s *Store) UpdateMachineWireGuardKey(ctx context.Context, id, publicKey string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE machines
+		SET wg_public_key = $2
+		WHERE id = $1
+	`, id, publicKey)
+	return err
+}
+
 // AssignMachine assigns a machine to an environment
 func (s *Store) AssignMachine(ctx context.Context, machineID, envID string) error {
 	_, err := s.pool.Exec(ctx, `
