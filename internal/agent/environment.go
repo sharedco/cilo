@@ -20,6 +20,7 @@ import (
 
 	"github.com/sharedco/cilo/internal/compose"
 	"github.com/sharedco/cilo/internal/models"
+	"gopkg.in/yaml.v3"
 )
 
 // EnvironmentManager handles Docker Compose operations
@@ -116,7 +117,7 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 	// Register proxy routes for each service
 	if m.proxy != nil {
 		for name, ip := range services {
-			port := m.detectContainerPort(ctx, fmt.Sprintf("cilo_%s_%s", req.EnvName, name))
+			port := m.detectServicePort(workspacePath, name)
 			hostname := fmt.Sprintf("%s.%s.test", name, req.EnvName)
 			target := fmt.Sprintf("http://%s:%s", ip, port)
 			m.proxy.AddRoute(hostname, target)
@@ -433,23 +434,33 @@ func (m *EnvironmentManager) getContainerIP(ctx context.Context, containerName, 
 	return ip, nil
 }
 
-// detectContainerPort detects the exposed port of a container
-func (m *EnvironmentManager) detectContainerPort(ctx context.Context, containerName string) string {
-	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format",
-		"{{range $port, $_ := .Config.ExposedPorts}}{{$port}} {{end}}", containerName)
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	if err := cmd.Run(); err != nil {
+func (m *EnvironmentManager) detectServicePort(workspacePath, serviceName string) string {
+	composePath := filepath.Join(workspacePath, "docker-compose.yml")
+	data, err := os.ReadFile(composePath)
+	if err != nil {
 		return "80"
 	}
-	ports := strings.Fields(strings.TrimSpace(stdout.String()))
-	for _, p := range ports {
-		parts := strings.SplitN(p, "/", 2)
-		if len(parts) > 0 && parts[0] != "" {
-			return parts[0]
-		}
+
+	var root struct {
+		Services map[string]struct {
+			Ports []interface{} `yaml:"ports"`
+		} `yaml:"services"`
 	}
-	return "80"
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return "80"
+	}
+
+	svc, ok := root.Services[serviceName]
+	if !ok || len(svc.Ports) == 0 {
+		return "80"
+	}
+
+	portStr := fmt.Sprintf("%v", svc.Ports[0])
+	parts := strings.Split(portStr, ":")
+	if len(parts) >= 2 {
+		return strings.Split(parts[len(parts)-1], "/")[0]
+	}
+	return strings.Split(parts[0], "/")[0]
 }
 
 // validateEnvName ensures environment name contains only safe characters
