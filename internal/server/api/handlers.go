@@ -215,10 +215,8 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request)
 		fmt.Printf("Warning: failed to update machine status: %v\n", err)
 	}
 
-	// Only auto-provision if NOT in CI mode. In CI mode, client will sync first then call /sync
-	if !req.CIMode {
-		go s.provisionEnvironment(env, availableMachine)
-	}
+	// Provisioning is triggered by the sync-complete endpoint after the client
+	// finishes rsyncing the workspace. Starting it here would race with rsync.
 
 	resp := CreateEnvironmentResponse{
 		Environment: &store.Environment{

@@ -129,9 +129,10 @@ server-clean:
   @echo "Stopping containers..."
   cd deploy/self-host && docker compose down -v 2>/dev/null || true
   @echo "Removing environment containers..."
-  docker ps -aq --filter "name=-api-" --filter "name=-nginx-" --filter "name=-redis-" | xargs -r docker stop 2>/dev/null || true
-  docker ps -aq --filter "name=-api-" --filter "name=-nginx-" --filter "name=-redis-" | xargs -r docker rm 2>/dev/null || true
+  docker ps -aq --filter "name=cilo_" | xargs -r docker stop 2>/dev/null || true
+  docker ps -aq --filter "name=cilo_" | xargs -r docker rm 2>/dev/null || true
   @echo "Removing environment networks..."
+  docker network ls --format "{{{{.Name}}}}" | grep -E "^cilo_" | xargs -r docker network rm 2>/dev/null || true
   docker network ls --format "{{{{.Name}}}}" | grep -E "^[a-f0-9-]{36}_default$$" | xargs -r docker network rm 2>/dev/null || true
   @echo "Stopping cilo-agent..."
   sudo pkill -x cilo-agent 2>/dev/null || true

@@ -285,8 +285,25 @@ func (m *EnvironmentManager) createNetwork(ctx context.Context, name, subnet str
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		// Network might already exist, which is fine
 		if strings.Contains(stderr.String(), "already exists") {
+			if m.networkSubnetMatches(ctx, name, subnet) {
+				return nil
+			}
+			log.Printf("Network %s exists with wrong subnet, recreating with %s", name, subnet)
+			rmCmd := exec.CommandContext(ctx, "docker", "network", "rm", name)
+			if rmErr := rmCmd.Run(); rmErr != nil {
+				return fmt.Errorf("failed to remove stale network %s: %w", name, rmErr)
+			}
+			retryCmd := exec.CommandContext(ctx, "docker", "network", "create",
+				"--driver", "bridge",
+				"--subnet", subnet,
+				name)
+			var retryStderr bytes.Buffer
+			retryCmd.Stderr = &retryStderr
+			if retryErr := retryCmd.Run(); retryErr != nil {
+				return fmt.Errorf("failed to recreate network: %w\nstderr: %s", retryErr, retryStderr.String())
+			}
+			log.Printf("Recreated Docker network %s with subnet %s", name, subnet)
 			return nil
 		}
 		return fmt.Errorf("failed to create network: %w\nstderr: %s", err, stderr.String())
@@ -294,6 +311,16 @@ func (m *EnvironmentManager) createNetwork(ctx context.Context, name, subnet str
 
 	log.Printf("Created Docker network %s with subnet %s", name, subnet)
 	return nil
+}
+
+func (m *EnvironmentManager) networkSubnetMatches(ctx context.Context, name, expectedSubnet string) bool {
+	cmd := exec.CommandContext(ctx, "docker", "network", "inspect", name, "--format", "{{range .IPAM.Config}}{{.Subnet}}{{end}}")
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return false
+	}
+	return strings.TrimSpace(stdout.String()) == expectedSubnet
 }
 
 func (m *EnvironmentManager) generateOverride(workspacePath, envName, subnet string) error {
