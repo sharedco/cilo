@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/sharedco/cilo/internal/config"
 	"github.com/sharedco/cilo/internal/models"
@@ -193,9 +194,16 @@ func reloadDNSGraceful() error {
 		return startDNS()
 	}
 
-	// Send SIGHUP for graceful reload (dnsmasq re-reads config on SIGHUP)
 	if err := syscall.Kill(pidInt, syscall.SIGHUP); err != nil {
-		// Process gone, restart
+		if errors.Is(err, syscall.EPERM) {
+			cmd := exec.Command("sudo", "kill", "-HUP", fmt.Sprintf("%d", pidInt))
+			if err := cmd.Run(); err != nil {
+				_ = exec.Command("sudo", "kill", fmt.Sprintf("%d", pidInt)).Run()
+				time.Sleep(100 * time.Millisecond)
+				return startDNS()
+			}
+			return nil
+		}
 		return startDNS()
 	}
 

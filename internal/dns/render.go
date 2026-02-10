@@ -29,7 +29,12 @@ func RenderConfig(state *models.State) (string, error) {
 	// Core dnsmasq settings
 	sb.WriteString("port=5354\n")
 	sb.WriteString("bind-interfaces\n")
-	sb.WriteString("listen-address=127.0.0.1\n\n")
+	sb.WriteString("listen-address=127.0.0.1\n")
+	// Run as current user so cilo can reload it later
+	if u := os.Getenv("SUDO_USER"); u != "" {
+		sb.WriteString(fmt.Sprintf("user=%s\n", u))
+	}
+	sb.WriteString("\n")
 
 	// Upstream DNS servers (detected from system)
 	upstreams := getSystemUpstreams()

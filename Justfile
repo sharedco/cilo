@@ -177,6 +177,26 @@ tunnel-clean:
   sudo rm -rf ~/.cilo/tunnel
   @echo "✓ Tunnel cleaned. Run 'sudo cilo cloud up <name>' to restart."
 
+# Clean slate - destroy all environments, remove all state, ready for fresh init
+clean-slate:
+  @echo "🧹 Clean slate - removing all cilo environments and state..."
+  @echo ""
+  @echo "  → Stopping all cilo containers..."
+  docker ps -aq --filter "name=cilo_" | xargs -r docker stop 2>/dev/null || true
+  @echo "  → Removing all cilo containers..."
+  docker ps -aq --filter "name=cilo_" | xargs -r docker rm 2>/dev/null || true
+  @echo "  → Removing all cilo networks..."
+  docker network ls --format "{{{{.Name}}}}" | grep -E "^cilo_" | xargs -r docker network rm 2>/dev/null || true
+  @echo "  → Stopping dnsmasq..."
+  sudo pkill -x dnsmasq 2>/dev/null || true
+  @echo "  → Removing cilo state..."
+  rm -rf ~/.cilo/envs/* ~/.cilo/state.json ~/.cilo/state.json.lock 2>/dev/null || true
+  @echo "  → Preserving DNS config (will be updated on next init)..."
+  @echo ""
+  @echo "✓ Clean slate complete! Ready for fresh start:"
+  @echo "   sudo cilo init"
+  @echo "   cd examples/basic && cilo create myenv && cilo up myenv"
+
 # Nuclear clean - wipe ALL cilo state on this machine (tunnel, cloud, dns, auth)
 clean-all:
   @echo "🧹 Nuclear clean - removing ALL cilo state..."
@@ -193,4 +213,4 @@ clean-all:
   @echo "  → Flushing DNS cache..."
   sudo dscacheutil -flushcache 2>/dev/null || true
   sudo killall -HUP mDNSResponder 2>/dev/null || true
-  @echo "✓ All cilo state removed. Run 'cilo cloud login' to start fresh."
+  @echo "✓ All cilo state removed. Run 'just init' to start fresh."
