@@ -18,15 +18,19 @@ import (
 	"github.com/sharedco/cilo/internal/agent/config"
 )
 
+// Server implements the cilod API
 type Server struct {
-	router     chi.Router
-	config     *config.Config
-	http       *http.Server
-	envManager *EnvironmentManager
-	wgManager  *WireGuardManager
-	proxy      *EnvProxy
+	router      chi.Router
+	config      *config.Config
+	http        *http.Server
+	envManager  *EnvironmentManager
+	wgManager   *WireGuardManager
+	proxy       *EnvProxy
+	authHandler *AuthHandler
+	peerStore   *JSONPeerStore
 }
 
+// NewServer creates a new agent server with all dependencies initialized
 func NewServer(cfg *config.Config) (*Server, error) {
 	wgMgr, err := NewWireGuardManager(cfg)
 	if err != nil {
@@ -36,14 +40,12 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to initialize WireGuard: %w", err)
 	}
 
-	// Create WireGuard interface on startup (requires root/CAP_NET_ADMIN)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := wgMgr.EnsureInterface(ctx); err != nil {
 		return nil, fmt.Errorf("failed to create WireGuard interface: %w", err)
 	}
 
-	// Start reverse proxy on WireGuard IP
 	var proxy *EnvProxy
 	wgIP := strings.Split(cfg.WGAddress, "/")[0]
 	proxyAddr := wgIP + ":80"
@@ -53,12 +55,22 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		proxy = nil
 	}
 
+	peerStore, err := NewJSONPeerStore("/var/cilo/peers.json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize peer store: %w", err)
+	}
+
+	verifier := NewDefaultSSHVerifier()
+	authHandler := NewAuthHandler(verifier, "/var/cilo/peers.json")
+
 	s := &Server{
-		router:     chi.NewRouter(),
-		config:     cfg,
-		envManager: NewEnvironmentManager(cfg.WorkspaceDir, proxy),
-		wgManager:  wgMgr,
-		proxy:      proxy,
+		router:      chi.NewRouter(),
+		config:      cfg,
+		envManager:  NewEnvironmentManager(cfg.WorkspaceDir, proxy),
+		wgManager:   wgMgr,
+		proxy:       proxy,
+		authHandler: authHandler,
+		peerStore:   peerStore,
 	}
 
 	s.setupMiddleware()
@@ -74,7 +86,7 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	return s, nil
 }
 
-// setupMiddleware configures the middleware stack for the router.
+// setupMiddleware configures the middleware stack for the router
 func (s *Server) setupMiddleware() {
 	s.router.Use(middleware.RequestID)
 	s.router.Use(middleware.Logger)
@@ -82,12 +94,35 @@ func (s *Server) setupMiddleware() {
 	s.router.Use(middleware.Timeout(120 * time.Second))
 }
 
-// setupRoutes configures all HTTP routes for the agent.
+// setupRoutes configures all HTTP routes for the agent
 func (s *Server) setupRoutes() {
-	// Health check
 	s.router.Get("/health", s.handleHealth)
 
-	// Environment management
+	s.router.Post("/auth/connect", s.HandleAuthConnect)
+	s.router.With(s.authHandler.AuthMiddleware).Delete("/auth/disconnect", s.HandleAuthDisconnect)
+
+	s.router.Group(func(r chi.Router) {
+		r.Use(s.authHandler.AuthMiddleware)
+
+		r.Get("/environments", s.HandleListEnvironments)
+		r.Route("/environments/{name}", func(env chi.Router) {
+			env.Post("/up", s.HandleEnvironmentUp)
+			env.Post("/down", s.HandleEnvironmentDown)
+			env.Delete("/", s.HandleEnvironmentDestroy)
+			env.Get("/status", s.HandleEnvironmentStatus)
+			env.Get("/logs", s.HandleEnvironmentLogs)
+			env.Post("/exec", s.HandleEnvironmentExec)
+		})
+
+		r.Route("/wireguard", func(wg chi.Router) {
+			wg.Post("/exchange", s.HandleWireGuardExchange)
+			wg.Delete("/peers/{key}", s.HandleWireGuardRemovePeer)
+			wg.Get("/status", s.HandleWireGuardStatus)
+		})
+
+		r.Post("/sync/{name}", s.HandleWorkspaceSync)
+	})
+
 	s.router.Route("/environment", func(r chi.Router) {
 		r.Post("/up", s.handleUp)
 		r.Post("/down", s.handleDown)
@@ -95,7 +130,6 @@ func (s *Server) setupRoutes() {
 		r.Get("/logs/{service}", s.handleLogs)
 	})
 
-	// WireGuard peer management
 	s.router.Route("/wireguard", func(r chi.Router) {
 		r.Post("/add-peer", s.handleAddPeer)
 		r.Delete("/remove-peer/{key}", s.handleRemovePeer)
@@ -103,12 +137,12 @@ func (s *Server) setupRoutes() {
 	})
 }
 
-// Start begins listening for HTTP requests.
+// Start begins listening for HTTP requests
 func (s *Server) Start() error {
 	return s.http.ListenAndServe()
 }
 
-// Shutdown gracefully shuts down the server.
+// Shutdown gracefully shuts down the server
 func (s *Server) Shutdown(ctx context.Context) error {
 	if s.proxy != nil {
 		s.proxy.Close()

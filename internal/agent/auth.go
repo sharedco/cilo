@@ -192,13 +192,25 @@ func (v *DefaultSSHVerifier) AddAuthorizedKey(publicKey string) error {
 	return nil
 }
 
-// Verify implements SSH signature verification
-// RED state: stub implementation that always succeeds
-// GREEN state: will implement actual crypto/ssh verification
+// Verify implements SSH signature verification using golang.org/x/crypto/ssh
 func (v *DefaultSSHVerifier) Verify(publicKey string, challenge string, signature string) error {
-	// RED state: return nil to allow tests to proceed
-	// This will be replaced with actual SSH signature verification
-	return nil
+	parsedKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(publicKey))
+	if err != nil {
+		return fmt.Errorf("failed to parse public key: %w", err)
+	}
+
+	sigBytes, err := base64.StdEncoding.DecodeString(signature)
+	if err != nil {
+		return fmt.Errorf("failed to decode signature: %w", err)
+	}
+
+	sigAlgo := parsedKey.Type()
+	sig := &ssh.Signature{
+		Format: sigAlgo,
+		Blob:   sigBytes,
+	}
+
+	return parsedKey.Verify([]byte(challenge), sig)
 }
 
 // GenerateChallenge creates a random challenge for authentication

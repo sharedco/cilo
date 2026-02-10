@@ -6,11 +6,13 @@ package agent
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -170,9 +172,10 @@ func generateTestChallenge() string {
 }
 
 // signChallenge signs a challenge with an RSA private key
+// Uses SHA1 to match the "ssh-rsa" algorithm expected by the SSH package
 func signChallenge(privateKey *rsa.PrivateKey, challenge string) (string, error) {
-	hash := sha256.Sum256([]byte(challenge))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, 0, hash[:])
+	hash := sha1.Sum([]byte(challenge))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA1, hash[:])
 	if err != nil {
 		return "", err
 	}
@@ -187,9 +190,23 @@ type stubSSHVerifier struct {
 }
 
 func (s *stubSSHVerifier) Verify(publicKey string, challenge string, signature string) error {
-	// RED state: stub always returns nil for authorized key
-	// GREEN state: will implement actual SSH signature verification
-	return nil
+	parsedKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(publicKey))
+	if err != nil {
+		return fmt.Errorf("failed to parse public key: %w", err)
+	}
+
+	sigBytes, err := base64.StdEncoding.DecodeString(signature)
+	if err != nil {
+		return fmt.Errorf("failed to decode signature: %w", err)
+	}
+
+	sigAlgo := parsedKey.Type()
+	sig := &ssh.Signature{
+		Format: sigAlgo,
+		Blob:   sigBytes,
+	}
+
+	return parsedKey.Verify([]byte(challenge), sig)
 }
 
 func (s *stubSSHVerifier) GenerateChallenge() (string, error) {

@@ -37,6 +37,80 @@ func NewEnvironmentManager(workspaceRoot string, proxy *EnvProxy) *EnvironmentMa
 	}
 }
 
+// List returns all environments in the workspace root
+func (m *EnvironmentManager) List(ctx context.Context) ([]EnvironmentInfo, error) {
+	entries, err := os.ReadDir(m.workspaceRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []EnvironmentInfo{}, nil
+		}
+		return nil, fmt.Errorf("failed to read workspace directory: %w", err)
+	}
+
+	var envs []EnvironmentInfo
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if err := validateEnvName(name); err != nil {
+			continue
+		}
+
+		info, err := m.getEnvironmentInfo(ctx, name)
+		if err != nil {
+			log.Printf("Warning: failed to get info for environment %s: %v", name, err)
+			continue
+		}
+		envs = append(envs, info)
+	}
+
+	return envs, nil
+}
+
+// getEnvironmentInfo returns detailed info about a single environment
+func (m *EnvironmentManager) getEnvironmentInfo(ctx context.Context, name string) (EnvironmentInfo, error) {
+	workspacePath := filepath.Join(m.workspaceRoot, name)
+	info := EnvironmentInfo{
+		Name:   name,
+		Status: "unknown",
+	}
+
+	// Get creation time from directory
+	if stat, err := os.Stat(workspacePath); err == nil {
+		info.CreatedAt = stat.ModTime()
+	}
+
+	// Get status from docker compose
+	statuses, err := m.Status(ctx, name)
+	if err != nil {
+		info.Status = "error"
+		return info, nil
+	}
+
+	// Determine overall status
+	if len(statuses) == 0 {
+		info.Status = "stopped"
+	} else {
+		running := 0
+		for _, s := range statuses {
+			info.Services = append(info.Services, s.Service)
+			if s.State == "running" {
+				running++
+			}
+		}
+		if running == len(statuses) {
+			info.Status = "running"
+		} else if running > 0 {
+			info.Status = "partial"
+		} else {
+			info.Status = "stopped"
+		}
+	}
+
+	return info, nil
+}
+
 // Up starts the environment using docker compose
 func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse, error) {
 	// Validate inputs
