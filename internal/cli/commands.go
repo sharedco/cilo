@@ -14,6 +14,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/sharedco/cilo/internal/cilod"
 	"github.com/sharedco/cilo/internal/config"
 	"github.com/sharedco/cilo/internal/models"
 	"github.com/sharedco/cilo/internal/runtime"
@@ -22,13 +23,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type envWithMachine struct {
+	*models.Environment
+	Machine string
+}
+
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List environments",
 	Long: `List environments for the current project or all environments.
 
 By default, shows environments for the current project (if in a configured project directory).
-Use --all to see all environments across all projects.`,
+Use --all to see all environments across all projects.
+
+When machines are connected via 'cilo connect', their environments are shown
+with the machine name in the MACHINE column. Local environments show as "local".`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		format, _ := cmd.Flags().GetString("format")
 		allFlag, _ := cmd.Flags().GetBool("all")
@@ -37,6 +46,53 @@ Use --all to see all environments across all projects.`,
 		envs, err := state.ListEnvironments()
 		if err != nil {
 			return err
+		}
+
+		machines, err := ListConnectedMachines()
+		if err != nil {
+			return err
+		}
+
+		var unifiedEnvs []envWithMachine
+
+		for _, env := range envs {
+			unifiedEnvs = append(unifiedEnvs, envWithMachine{
+				Environment: env,
+				Machine:     "local",
+			})
+		}
+
+		for _, machine := range machines {
+			client := cilod.NewClient(machine.WGAssignedIP, machine.Token)
+			remoteEnvs, err := client.ListEnvironments()
+			if err != nil {
+				unifiedEnvs = append(unifiedEnvs, envWithMachine{
+					Environment: &models.Environment{
+						Name:    "(unreachable)",
+						Project: "",
+						Status:  "unreachable",
+					},
+					Machine: machine.Host,
+				})
+				continue
+			}
+
+			for _, remoteEnv := range remoteEnvs {
+				services := make(map[string]*models.Service)
+				for _, svcName := range remoteEnv.Services {
+					services[svcName] = &models.Service{Name: svcName}
+				}
+				unifiedEnvs = append(unifiedEnvs, envWithMachine{
+					Environment: &models.Environment{
+						Name:      remoteEnv.Name,
+						Project:   "",
+						Status:    remoteEnv.Status,
+						CreatedAt: remoteEnv.CreatedAt,
+						Services:  services,
+					},
+					Machine: machine.Host,
+				})
+			}
 		}
 
 		if !allFlag {
@@ -56,18 +112,18 @@ Use --all to see all environments across all projects.`,
 			}
 
 			if currentProject != "" {
-				projectEnvs := make([]*models.Environment, 0)
-				for _, env := range envs {
-					if env.Project == currentProject {
-						projectEnvs = append(projectEnvs, env)
+				filtered := make([]envWithMachine, 0)
+				for _, ewm := range unifiedEnvs {
+					if ewm.Environment.Project == currentProject || ewm.Environment.Name == "(unreachable)" {
+						filtered = append(filtered, ewm)
 					}
 				}
-				envs = projectEnvs
+				unifiedEnvs = filtered
 				fmt.Printf("Environments for project: %s\n\n", currentProject)
 			}
 		}
 
-		if len(envs) == 0 {
+		if len(unifiedEnvs) == 0 {
 			if allFlag {
 				fmt.Println("No environments found")
 			} else {
@@ -79,11 +135,11 @@ Use --all to see all environments across all projects.`,
 
 		switch format {
 		case "json":
-			return listJSON(envs, allFlag)
+			return listJSON(unifiedEnvs, allFlag)
 		case "quiet":
-			return listQuiet(envs, allFlag)
+			return listQuiet(unifiedEnvs, allFlag)
 		default:
-			return listTable(envs, allFlag)
+			return listTable(unifiedEnvs, allFlag)
 		}
 	},
 }
@@ -283,19 +339,19 @@ func init() {
 	composeCmd.Flags().String("project", "", "Project name (defaults to configured project)")
 }
 
-func listTable(envs []*models.Environment, all bool) error {
+func listTable(envs []envWithMachine, all bool) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	if all {
-		fmt.Fprintf(w, "PROJECT\tNAME\tSTATUS\tSERVICES\tCREATED\t\n")
-		fmt.Fprintf(w, "-------\t----\t------\t--------\t-------\t\n")
+		fmt.Fprintf(w, "ENVIRONMENT\tPROJECT\tSTATUS\tMACHINE\tSERVICES\t\n")
+		fmt.Fprintf(w, "-----------\t-------\t------\t-------\t--------\t\n")
 	} else {
-		fmt.Fprintf(w, "NAME\tSTATUS\tSERVICES\tCREATED\t\n")
-		fmt.Fprintf(w, "----\t------\t--------\t-------\t\n")
+		fmt.Fprintf(w, "ENVIRONMENT\tSTATUS\tMACHINE\tSERVICES\t\n")
+		fmt.Fprintf(w, "-----------\t------\t-------\t--------\t\n")
 	}
 
-	for _, env := range envs {
-		services := make([]string, 0, len(env.Services))
-		for name := range env.Services {
+	for _, ewm := range envs {
+		services := make([]string, 0, len(ewm.Services))
+		for name := range ewm.Services {
 			services = append(services, name)
 		}
 		serviceList := strings.Join(services, ", ")
@@ -303,27 +359,26 @@ func listTable(envs []*models.Environment, all bool) error {
 			serviceList = serviceList[:27] + "..."
 		}
 
-		created := env.CreatedAt.Format("Jan 02 15:04")
 		if all {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t\n", env.Project, env.Name, env.Status, serviceList, created)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t\n", ewm.Name, ewm.Project, ewm.Status, ewm.Machine, serviceList)
 		} else {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t\n", env.Name, env.Status, serviceList, created)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t\n", ewm.Name, ewm.Status, ewm.Machine, serviceList)
 		}
 	}
 
 	return w.Flush()
 }
 
-func listJSON(envs []*models.Environment, all bool) error {
+func listJSON(envs []envWithMachine, all bool) error {
 	var output []map[string]interface{}
 
-	for _, env := range envs {
-		if !all && env.Status == "stopped" {
+	for _, ewm := range envs {
+		if !all && ewm.Status == "stopped" {
 			continue
 		}
 
-		services := make([]map[string]string, 0, len(env.Services))
-		for _, svc := range env.Services {
+		services := make([]map[string]string, 0, len(ewm.Services))
+		for _, svc := range ewm.Services {
 			services = append(services, map[string]string{
 				"name": svc.Name,
 				"url":  svc.URL,
@@ -332,10 +387,12 @@ func listJSON(envs []*models.Environment, all bool) error {
 		}
 
 		output = append(output, map[string]interface{}{
-			"name":       env.Name,
-			"status":     env.Status,
-			"created_at": env.CreatedAt,
-			"subnet":     env.Subnet,
+			"name":       ewm.Name,
+			"project":    ewm.Project,
+			"status":     ewm.Status,
+			"machine":    ewm.Machine,
+			"created_at": ewm.CreatedAt,
+			"subnet":     ewm.Subnet,
 			"services":   services,
 		})
 	}
@@ -345,12 +402,12 @@ func listJSON(envs []*models.Environment, all bool) error {
 	return encoder.Encode(output)
 }
 
-func listQuiet(envs []*models.Environment, all bool) error {
-	for _, env := range envs {
-		if !all && env.Status == "stopped" {
+func listQuiet(envs []envWithMachine, all bool) error {
+	for _, ewm := range envs {
+		if !all && ewm.Status == "stopped" {
 			continue
 		}
-		fmt.Println(env.Name)
+		fmt.Println(ewm.Name)
 	}
 	return nil
 }

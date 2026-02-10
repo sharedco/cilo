@@ -24,6 +24,7 @@ import (
 	"github.com/sharedco/cilo/internal/runtime/docker"
 	"github.com/sharedco/cilo/internal/share"
 	"github.com/sharedco/cilo/internal/state"
+	"github.com/sharedco/cilo/internal/sync"
 	"github.com/spf13/cobra"
 )
 
@@ -612,9 +613,47 @@ func upRemote(cmd *cobra.Command, args []string, target Target) error {
 		return fmt.Errorf("no cilod client available for remote target")
 	}
 
+	// Sync workspace to remote machine before starting
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	// Get the machine info to retrieve the WireGuard IP
+	machine, err := GetMachine(target.GetMachine())
+	if err != nil {
+		return fmt.Errorf("failed to get machine info: %w", err)
+	}
+	if machine == nil {
+		return fmt.Errorf("machine '%s' not found", target.GetMachine())
+	}
+
+	// Use the WireGuard assigned IP for SSH (through the tunnel)
+	remoteHost := machine.WGAssignedIP
+	if remoteHost == "" {
+		// Fallback to the machine host if WG IP is not available
+		remoteHost = target.GetMachine()
+	}
+
+	// Remote workspace path
+	remoteWorkspace := fmt.Sprintf("/var/cilo/envs/%s/%s", project, name)
+
+	fmt.Printf("Syncing workspace to %s...\n", target.GetMachine())
+	syncOpts := sync.SyncOptions{
+		RemoteHost: remoteHost,
+		RemotePath: remoteWorkspace,
+		UseRsync:   true,
+	}
+
+	if err := sync.SyncWorkspace(cwd, remoteHost, remoteWorkspace, syncOpts); err != nil {
+		return fmt.Errorf("failed to sync workspace: %w", err)
+	}
+	fmt.Printf("✓ Workspace synced to %s\n", target.GetMachine())
+
 	opts := cilod.UpOptions{
-		Build:    build,
-		Recreate: recreate,
+		Build:         build,
+		Recreate:      recreate,
+		WorkspacePath: remoteWorkspace,
 	}
 
 	fmt.Printf("Starting environment %s/%s on %s...\n", project, name, target.GetMachine())

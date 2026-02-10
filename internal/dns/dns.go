@@ -315,7 +315,7 @@ func setupMacOSResolver(state *models.State) error {
 	return nil
 }
 
-func getDNSDir() string {
+var getDNSDir = func() string {
 	return config.GetDNSDir()
 }
 

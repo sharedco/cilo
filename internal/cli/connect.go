@@ -14,6 +14,7 @@ import (
 
 	"github.com/sharedco/cilo/internal/cilod"
 	"github.com/sharedco/cilo/internal/cloud/tunnel"
+	"github.com/sharedco/cilo/internal/dns"
 	"github.com/spf13/cobra"
 )
 
@@ -129,6 +130,17 @@ func runConnect(host string) error {
 		envCount = len(envs)
 	}
 
+	if envCount > 0 {
+		fmt.Println("  Setting up DNS entries...")
+		remoteMachine := &dns.RemoteMachine{
+			Host:         host,
+			WGAssignedIP: wgConfig.AssignedIP,
+		}
+		if err := dns.AddRemoteMachine(remoteMachine, envs); err != nil {
+			fmt.Printf("  Warning: failed to add DNS entries: %v\n", err)
+		}
+	}
+
 	fmt.Printf("\nConnected to %s\n", host)
 	fmt.Printf("  WireGuard IP: %s\n", wgConfig.AssignedIP)
 	fmt.Printf("  Environments: %d\n", envCount)
@@ -154,14 +166,15 @@ func runDisconnect(host string) error {
 		return fmt.Errorf("machine not connected: %s", host)
 	}
 
+	if err := dns.RemoveRemoteMachine(host); err != nil {
+		fmt.Printf("  Warning: failed to remove DNS entries: %v\n", err)
+	}
+
 	// Stop tunnel daemon if running
 	if machine.WGInterface != "" {
 		fmt.Printf("  Stopping tunnel...\n")
-		// Note: In a full implementation, we would stop the specific tunnel
-		// For now, we rely on the general tunnel cleanup
 	}
 
-	// Remove machine state
 	if err := RemoveMachine(host); err != nil {
 		return fmt.Errorf("failed to remove machine state: %w", err)
 	}

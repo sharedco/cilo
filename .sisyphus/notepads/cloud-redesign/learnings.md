@@ -251,3 +251,226 @@ All lifecycle commands now have --on flag in Global Flags:
 4. **Consistent Pattern**: All commands use same routing pattern
 5. **Stub Implementations**: Remote exec/logs use stubs - full WebSocket in Task 11
 6. **Workspace Sync**: Remote run stubs for sync - full rsync in Task 8
+
+## Task 8: Implement Workspace Sync for --on Operations
+
+### Completed: 2026-02-10
+
+### Files Created:
+- `internal/sync/sync.go` - Workspace sync implementation
+- `internal/sync/sync_test.go` - Comprehensive test suite
+
+### Files Modified:
+- `internal/cli/lifecycle.go` - Added sync before upRemote
+- `internal/cli/run.go` - Added sync before runRemote
+
+### Sync Package Design:
+
+#### SyncOptions
+```go
+type SyncOptions struct {
+    RemoteHost     string   // Target machine (WireGuard IP)
+    RemotePath     string   // Destination path on remote
+    UseRsync       bool     // Prefer rsync over tar+ssh
+    ProgressWriter io.Writer // Optional progress output
+    SSHKeyPath     string   // SSH key for authentication
+    SSHPort        int      // SSH port (default 22)
+}
+```
+
+#### SyncWorkspace Function
+- Primary entry point for workspace synchronization
+- Validates inputs (local path exists, remote host/path provided)
+- Reads `.ciloignore` file if present (gitignore format)
+- Combines default excludes with .ciloignore patterns
+- Auto-detects rsync availability
+- Falls back to tar+ssh if rsync unavailable
+
+### Default Excludes:
+```go
+[]string{
+    ".git/",           // Git repository
+    "node_modules/",   // Node dependencies
+    ".cilo/",          // Cilo metadata
+    "__pycache__/",    // Python cache
+    ".venv/",          // Python virtualenv
+    ".env.local",      // Local env files
+    "*.log",           // Log files
+    ".DS_Store",       // macOS metadata
+    "Thumbs.db",       // Windows metadata
+    ".ciloignore",     // Ignore file itself
+}
+```
+
+### Sync Methods:
+
+#### Rsync (Preferred)
+- Uses `rsync -avz --delete --checksum`
+- SSH over WireGuard tunnel (uses WG assigned IP)
+- Incremental sync (only changed files)
+- Efficient delta transfer
+- Supports exclude patterns natively
+
+#### Tar+SSH (Fallback)
+- Creates compressed tar archive locally
+- Streams through SSH to remote
+- Extracts on remote side
+- Full sync every time (no incremental)
+- Used when rsync not available
+
+### .ciloignore Support:
+- Gitignore-style pattern matching
+- Comments (#) and empty lines ignored
+- Supports negation patterns (!important.log)
+- Directory patterns (build/)
+- Wildcard patterns (*.log)
+
+### WireGuard Integration:
+- Uses machine's `WGAssignedIP` for SSH connectivity
+- Falls back to machine hostname if WG IP unavailable
+- SSH through established WireGuard tunnel
+- No public IP exposure
+
+### Test Coverage:
+
+#### sync_test.go
+- `TestRsyncSync` - Full directory sync verification
+- `TestSyncExcludes` - Default excludes respected
+- `TestSyncIncremental` - Only changed files transferred
+- `TestSyncCiloignore` - .ciloignore patterns respected
+- `TestSyncFallback` - tar+ssh fallback works
+- `TestSyncOptions` - Options validation
+- `TestParseCiloignore` - Ignore file parsing
+- `TestDefaultExcludes` - Default patterns correct
+- `TestIsRsyncAvailable` - Rsync detection
+- `TestBuildRsyncArgs` - Rsync argument building
+- `TestSyncWorkspaceValidation` - Input validation
+
+### Command Integration:
+
+#### cilo up --on <machine>
+1. Resolve target machine
+2. Get WireGuard IP from machine state
+3. Sync workspace: `SyncWorkspace(cwd, wgIP, remoteWorkspace, opts)`
+4. Call cilod.UpEnvironment with WorkspacePath
+
+#### cilo run --on <machine>
+1. Resolve target machine
+2. Get WireGuard IP from machine state
+3. If creating environment: sync workspace first
+4. If starting environment: sync workspace first
+5. Execute command via cilod.Exec
+
+### Remote Workspace Path:
+```
+/var/cilo/envs/<project>/<environment>/
+```
+
+### Build Verification:
+- `go build ./internal/sync/...` - Success
+- `go test ./internal/sync/ -v` - All 14 tests PASS
+- `go build ./cmd/cilo` - Success
+
+### Key Implementation Notes:
+
+1. **Efficient Sync**: Rsync with --checksum for accurate incremental sync
+2. **Smart Excludes**: Combines defaults + .ciloignore for minimal transfer
+3. **Graceful Fallback**: tar+ssh works when rsync unavailable
+4. **WireGuard Native**: Uses WG tunnel IP, not public IP
+5. **Progress Support**: Optional ProgressWriter for user feedback
+6. **Validation**: Comprehensive input validation before sync
+7. **Security**: SSH key auth through WireGuard tunnel
+
+## Task 10: Remote DNS Integration
+
+### Completed: 2026-02-10
+
+### Files Created:
+- `internal/dns/remote.go` - Remote DNS management functions
+- `internal/dns/remote_test.go` - Comprehensive test suite
+
+### Files Modified:
+- `internal/dns/dns.go` - Changed getDNSDir to variable for testability
+- `internal/cli/connect.go` - Wired AddRemoteMachine on connect, RemoveRemoteMachine on disconnect
+
+### Remote DNS Design:
+
+#### RemoteMachine Struct
+```go
+type RemoteMachine struct {
+    Host         string
+    WGAssignedIP string
+}
+```
+Minimal struct to avoid import cycles with internal/cli.
+
+#### DNS Entry Format
+- Same convention as local: `{service}.{env}.test`
+- Points to WireGuard proxy IP (cilod's WGAssignedIP)
+- Example: `api.remote-env.test → 10.225.1.5`
+
+#### Config File Markers
+```
+# Remote machine: remote.example.com
+address=/api.env1.test/10.225.1.5
+address=/db.env1.test/10.225.1.5
+# End remote machine: remote.example.com
+```
+
+### Functions Implemented:
+
+#### AddRemoteMachine(machine *RemoteMachine, envs []cilod.Environment)
+- Adds DNS entries for all services on all environments
+- Idempotent: removes existing entries first
+- Appends to existing dnsmasq.conf
+- Reloads dnsmasq gracefully (SIGHUP)
+
+#### RemoveRemoteMachine(host string)
+- Removes all DNS entries for a machine by host
+- Uses marker-based section removal
+- Preserves all local and other remote entries
+- Reloads dnsmasq gracefully
+
+#### UpdateRemoteDNSEntries(machine *RemoteMachine, envs []cilod.Environment)
+- Convenience function: Remove + Add
+- Used when environments change on remote machine
+
+### Integration Points:
+
+#### cilo connect
+1. Authenticate with cilod
+2. Exchange WireGuard keys
+3. Save machine state
+4. **NEW**: Fetch environments from cilod
+5. **NEW**: Call AddRemoteMachine() with WG IP and envs
+6. Print connection summary
+
+#### cilo disconnect
+1. **NEW**: Call RemoveRemoteMachine() to clean up DNS
+2. Stop tunnel daemon
+3. Remove machine state
+
+### Test Coverage:
+
+#### remote_test.go
+- `TestAddRemoteDNSEntries` - Adds entries for remote services
+- `TestRemoveRemoteDNSEntries` - Cleans up on disconnect
+- `TestRemoteDNSResolution` - Verifies WG IP resolution
+- `TestUpdateRemoteDNSEntries` - Updates when envs change
+- `TestAddRemoteMachine_MultipleEnvironments` - Multiple envs support
+- `TestLocalDNSEntriesUnaffected` - Local entries preserved
+
+### Key Implementation Notes:
+
+1. **Same DNS Convention**: Uses {service}.{env}.test format (identical to local)
+2. **WireGuard IP**: All entries point to cilod's WG proxy IP
+3. **Marker-Based**: Uses # Remote machine: headers for easy removal
+4. **Idempotent**: Can safely call AddRemoteMachine multiple times
+5. **Local Preservation**: Local DNS entries completely unaffected
+6. **No Polling**: No refresh daemon - explicit add/remove only
+7. **Import Cycle Avoidance**: RemoteMachine defined in dns package
+
+### Build Verification:
+- `go build ./internal/dns/...` - Success
+- `go test ./internal/dns/ -v` - All 8 tests PASS
+- `go build ./cmd/cilo` - Success

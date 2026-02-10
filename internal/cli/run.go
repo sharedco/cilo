@@ -16,6 +16,7 @@ import (
 	"github.com/sharedco/cilo/internal/config"
 	"github.com/sharedco/cilo/internal/models"
 	"github.com/sharedco/cilo/internal/state"
+	"github.com/sharedco/cilo/internal/sync"
 	"github.com/spf13/cobra"
 )
 
@@ -203,22 +204,70 @@ func runRemote(cmd *cobra.Command, args []string, target Target) error {
 		return fmt.Errorf("no cilod client available for remote target")
 	}
 
-	// For remote run, we need to:
-	// 1. Ensure the environment exists (create if needed and --no-create not set)
-	// 2. Start the environment if not running and --no-up not set
-	// 3. Execute the command
+	// Get current directory for workspace sync
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	// Get project name
+	projectFlag, _ := cmd.Flags().GetString("project")
+	project := projectFlag
+	if project == "" {
+		sourceConfig, err := models.LoadProjectConfigFromPath(cwd)
+		if err != nil {
+			return fmt.Errorf("failed to load project config: %w", err)
+		}
+		if sourceConfig != nil && sourceConfig.Project != "" {
+			project = sourceConfig.Project
+		} else {
+			project = filepath.Base(cwd)
+		}
+	}
+	project = state.NormalizeName(project)
+
+	// Get the machine info to retrieve the WireGuard IP
+	machine, err := GetMachine(target.GetMachine())
+	if err != nil {
+		return fmt.Errorf("failed to get machine info: %w", err)
+	}
+	if machine == nil {
+		return fmt.Errorf("machine '%s' not found", target.GetMachine())
+	}
+
+	// Use the WireGuard assigned IP for SSH (through the tunnel)
+	remoteHost := machine.WGAssignedIP
+	if remoteHost == "" {
+		remoteHost = target.GetMachine()
+	}
+
+	// Remote workspace path
+	remoteWorkspace := fmt.Sprintf("/var/cilo/envs/%s/%s", project, envName)
 
 	fmt.Printf("Running '%s' in environment %s on %s...\n", command, envName, target.GetMachine())
 
 	// Check if environment exists
-	_, err := client.GetStatus(envName)
+	_, err = client.GetStatus(envName)
 	if err != nil {
 		if noCreate {
 			return fmt.Errorf("environment %s does not exist on %s (use 'cilo create' first, or remove --no-create)", envName, target.GetMachine())
 		}
-		// Create environment
+		// Create environment - will sync workspace as part of up
 		fmt.Printf("Creating environment %s on %s...\n", envName, target.GetMachine())
-		if err := client.UpEnvironment(envName, cilod.UpOptions{}); err != nil {
+
+		// Sync workspace before creating environment
+		fmt.Printf("Syncing workspace to %s...\n", target.GetMachine())
+		syncOpts := sync.SyncOptions{
+			RemoteHost: remoteHost,
+			RemotePath: remoteWorkspace,
+			UseRsync:   true,
+		}
+		if err := sync.SyncWorkspace(cwd, remoteHost, remoteWorkspace, syncOpts); err != nil {
+			return fmt.Errorf("failed to sync workspace: %w", err)
+		}
+		fmt.Printf("✓ Workspace synced to %s\n", target.GetMachine())
+
+		if err := client.UpEnvironment(envName, cilod.UpOptions{WorkspacePath: remoteWorkspace}); err != nil {
 			return fmt.Errorf("failed to create environment on remote: %w", err)
 		}
 	}
@@ -226,7 +275,20 @@ func runRemote(cmd *cobra.Command, args []string, target Target) error {
 	// Start environment if needed
 	if !noUp {
 		fmt.Printf("Starting environment %s on %s...\n", envName, target.GetMachine())
-		if err := client.UpEnvironment(envName, cilod.UpOptions{}); err != nil {
+
+		// Sync workspace before starting
+		fmt.Printf("Syncing workspace to %s...\n", target.GetMachine())
+		syncOpts := sync.SyncOptions{
+			RemoteHost: remoteHost,
+			RemotePath: remoteWorkspace,
+			UseRsync:   true,
+		}
+		if err := sync.SyncWorkspace(cwd, remoteHost, remoteWorkspace, syncOpts); err != nil {
+			return fmt.Errorf("failed to sync workspace: %w", err)
+		}
+		fmt.Printf("✓ Workspace synced to %s\n", target.GetMachine())
+
+		if err := client.UpEnvironment(envName, cilod.UpOptions{WorkspacePath: remoteWorkspace}); err != nil {
 			return fmt.Errorf("failed to start environment on remote: %w", err)
 		}
 	}
