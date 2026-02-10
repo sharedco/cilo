@@ -68,6 +68,17 @@ func (e *Exchange) RegisterPeer(ctx context.Context, machineInfo MachineInfo, pe
 		return nil, fmt.Errorf("peer public key is required")
 	}
 
+	// Correct model: one tunnel peer per (machine, user). Reuse it across
+	// multiple environments so repeated cloud ups don't allocate new peers/IPs.
+	if peer.UserID != "" {
+		if existing, err := e.store.GetPeerByMachineUser(ctx, machineInfo.ID, peer.UserID); err == nil {
+			if existing.PublicKey == peer.PublicKey {
+				_ = e.store.UpdateLastSeen(ctx, peer.PublicKey)
+				return e.buildPeerConfig(machineInfo, existing.AssignedIP), nil
+			}
+		}
+	}
+
 	// Check if peer already exists
 	existingPeer, err := e.store.GetPeer(ctx, peer.PublicKey)
 	if err == nil {
@@ -103,7 +114,15 @@ func (e *Exchange) RegisterPeer(ctx context.Context, machineInfo MachineInfo, pe
 
 	// Retry insert on unique constraint violation (machine_id, assigned_ip).
 	for attempts := 0; attempts < 50; attempts++ {
+		// Errors inside a Postgres transaction abort the transaction unless we use
+		// a savepoint. Use a savepoint per attempt so we can retry on unique
+		// violations without losing the advisory lock.
+		if _, err := tx.Exec(ctx, "SAVEPOINT cilo_peer_attempt"); err != nil {
+			return nil, fmt.Errorf("savepoint: %w", err)
+		}
+
 		if !e.peerSubnet.Contains(net.ParseIP(assignedIP)) {
+			_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT cilo_peer_attempt")
 			return nil, fmt.Errorf("assigned IP %s is not in peer subnet %s", assignedIP, e.peerSubnet.String())
 		}
 
@@ -120,11 +139,14 @@ func (e *Exchange) RegisterPeer(ctx context.Context, machineInfo MachineInfo, pe
 
 		err := e.store.CreatePeerTx(ctx, tx, newPeer)
 		if err == nil {
+			_, _ = tx.Exec(ctx, "RELEASE SAVEPOINT cilo_peer_attempt")
 			break
 		}
+		_, _ = tx.Exec(ctx, "ROLLBACK TO SAVEPOINT cilo_peer_attempt")
 
 		constraint := uniqueConstraintName(err)
 		if constraint == "idx_wireguard_peers_machine_ip" {
+			// Try the next candidate.
 			ip := net.ParseIP(assignedIP)
 			if ip == nil {
 				return nil, fmt.Errorf("failed to parse assigned IP %q", assignedIP)

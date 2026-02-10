@@ -134,6 +134,36 @@ func (s *Store) GetPeer(ctx context.Context, publicKey string) (*Peer, error) {
 	return &peer, nil
 }
 
+func (s *Store) GetPeerByMachineUser(ctx context.Context, machineID, userID string) (*Peer, error) {
+	query := `
+		SELECT id, machine_id, environment_id, user_id, public_key, assigned_ip::TEXT, connected_at, last_seen
+		FROM wireguard_peers
+		WHERE machine_id = $1 AND user_id = $2
+		ORDER BY last_seen DESC
+		LIMIT 1
+	`
+
+	var peer Peer
+	err := s.db.QueryRow(ctx, query, machineID, userID).Scan(
+		&peer.ID,
+		&peer.MachineID,
+		&peer.EnvironmentID,
+		&peer.UserID,
+		&peer.PublicKey,
+		&peer.AssignedIP,
+		&peer.ConnectedAt,
+		&peer.LastSeen,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, pgx.ErrNoRows
+		}
+		return nil, fmt.Errorf("failed to get peer: %w", err)
+	}
+
+	return &peer, nil
+}
+
 // GetPeersByMachine retrieves all peers connected to a machine
 func (s *Store) GetPeersByMachine(ctx context.Context, machineID string) ([]*Peer, error) {
 	query := `
