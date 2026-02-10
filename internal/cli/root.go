@@ -35,6 +35,9 @@ func init() {
 	initCmd.Flags().String("base-subnet", "", "Base subnet for environments (e.g. 10.224.)")
 	initCmd.Flags().Int("dns-port", 0, "Port for the local DNS daemon (default: 5354)")
 
+	// Add --on persistent flag for remote machine targeting (available on all subcommands)
+	rootCmd.PersistentFlags().String("on", "", "Execute on a remote machine (requires 'cilo connect' first)")
+
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(configCmd)
@@ -53,6 +56,7 @@ func init() {
 	rootCmd.AddCommand(diffCmd)
 	rootCmd.AddCommand(mergeCmd)
 	rootCmd.AddCommand(networkCmd)
+	rootCmd.AddCommand(machinesCmd)
 }
 
 var initCmd = &cobra.Command{

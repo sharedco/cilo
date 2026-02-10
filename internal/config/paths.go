@@ -41,3 +41,7 @@ func GetDNSDir() string {
 func GetEnvPath(project, name string) string {
 	return filepath.Join(GetEnvsDir(), project, name)
 }
+
+func GetMachinesDir() string {
+	return filepath.Join(GetCiloHome(), "machines")
+}

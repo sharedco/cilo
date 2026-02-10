@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/sharedco/cilo/internal/cilod"
 	"github.com/sharedco/cilo/internal/compose"
 	"github.com/sharedco/cilo/internal/config"
 	"github.com/sharedco/cilo/internal/models"
@@ -34,6 +35,15 @@ func init() {
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
+	target, err := resolveTarget(cmd)
+	if err != nil {
+		return err
+	}
+
+	if target.IsRemote() {
+		return runRemote(cmd, args, target)
+	}
+
 	command := args[0]
 	envName := state.NormalizeName(args[1])
 	cmdArgs := args[2:]
@@ -177,4 +187,58 @@ func isInitialized() bool {
 	statePath := config.GetStatePath()
 	_, err := os.Stat(statePath)
 	return err == nil
+}
+
+// runRemote handles the run command for a remote machine via cilod
+func runRemote(cmd *cobra.Command, args []string, target Target) error {
+	command := args[0]
+	envName := state.NormalizeName(args[1])
+	cmdArgs := args[2:]
+
+	noUp, _ := cmd.Flags().GetBool("no-up")
+	noCreate, _ := cmd.Flags().GetBool("no-create")
+
+	client := target.GetClient()
+	if client == nil {
+		return fmt.Errorf("no cilod client available for remote target")
+	}
+
+	// For remote run, we need to:
+	// 1. Ensure the environment exists (create if needed and --no-create not set)
+	// 2. Start the environment if not running and --no-up not set
+	// 3. Execute the command
+
+	fmt.Printf("Running '%s' in environment %s on %s...\n", command, envName, target.GetMachine())
+
+	// Check if environment exists
+	_, err := client.GetStatus(envName)
+	if err != nil {
+		if noCreate {
+			return fmt.Errorf("environment %s does not exist on %s (use 'cilo create' first, or remove --no-create)", envName, target.GetMachine())
+		}
+		// Create environment
+		fmt.Printf("Creating environment %s on %s...\n", envName, target.GetMachine())
+		if err := client.UpEnvironment(envName, cilod.UpOptions{}); err != nil {
+			return fmt.Errorf("failed to create environment on remote: %w", err)
+		}
+	}
+
+	// Start environment if needed
+	if !noUp {
+		fmt.Printf("Starting environment %s on %s...\n", envName, target.GetMachine())
+		if err := client.UpEnvironment(envName, cilod.UpOptions{}); err != nil {
+			return fmt.Errorf("failed to start environment on remote: %w", err)
+		}
+	}
+
+	// Execute the command
+	fmt.Printf("Executing '%s' in %s on %s...\n", command, envName, target.GetMachine())
+
+	// For now, we use the Exec method which is a stub in the cilod client
+	// Full implementation with WebSocket streaming will be in Task 11
+	if err := client.Exec(envName, "", append([]string{command}, cmdArgs...)); err != nil {
+		return fmt.Errorf("failed to execute command on remote: %w", err)
+	}
+
+	return nil
 }

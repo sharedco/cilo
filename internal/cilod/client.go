@@ -61,6 +61,11 @@ func (c *Client) SetRetryPolicy(maxRetries int, delay time.Duration) {
 	c.retryDelay = delay
 }
 
+// SetToken sets the authentication token for subsequent requests
+func (c *Client) SetToken(token string) {
+	c.token = token
+}
+
 // Connect authenticates with the cilod server using SSH key challenge-response
 // Returns a session token that must be used for subsequent requests
 func (c *Client) Connect(sshPrivateKeyPath string) (string, error) {

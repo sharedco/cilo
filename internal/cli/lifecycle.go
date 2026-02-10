@@ -12,13 +12,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sharedco/cilo/internal/cilod"
 	"github.com/sharedco/cilo/internal/compose"
 	"github.com/sharedco/cilo/internal/dns"
 	"github.com/sharedco/cilo/internal/engine"
 	envpkg "github.com/sharedco/cilo/internal/env"
 	"github.com/sharedco/cilo/internal/filesystem"
 	"github.com/sharedco/cilo/internal/models"
-	_ "github.com/sharedco/cilo/internal/parsers" // register parsers
+	_ "github.com/sharedco/cilo/internal/parsers"
 	"github.com/sharedco/cilo/internal/runtime"
 	"github.com/sharedco/cilo/internal/runtime/docker"
 	"github.com/sharedco/cilo/internal/share"
@@ -171,6 +172,16 @@ var upCmd = &cobra.Command{
 	Short: "Start an environment",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Route to remote machine if --on flag is specified
+		target, err := resolveTarget(cmd)
+		if err != nil {
+			return err
+		}
+
+		if target.IsRemote() {
+			return upRemote(cmd, args, target)
+		}
+
 		project, name, err := getProjectAndEnv(cmd, args)
 		if err != nil {
 			return err
@@ -365,6 +376,15 @@ var downCmd = &cobra.Command{
 	Short: "Stop an environment",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		target, err := resolveTarget(cmd)
+		if err != nil {
+			return err
+		}
+
+		if target.IsRemote() {
+			return downRemote(cmd, args, target)
+		}
+
 		project, name, err := getProjectAndEnv(cmd, args)
 		if err != nil {
 			return err
@@ -417,6 +437,15 @@ var destroyCmd = &cobra.Command{
 	Short: "Destroy an environment",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		target, err := resolveTarget(cmd)
+		if err != nil {
+			return err
+		}
+
+		if target.IsRemote() {
+			return destroyRemote(cmd, args, target)
+		}
+
 		project, name, err := getProjectAndEnv(cmd, args)
 		if err != nil {
 			return err
@@ -566,4 +595,90 @@ func filterOut(slice []string, filter []string) []string {
 		}
 	}
 	return result
+}
+
+// upRemote handles the up command for a remote machine via cilod
+func upRemote(cmd *cobra.Command, args []string, target Target) error {
+	project, name, err := getProjectAndEnv(cmd, args)
+	if err != nil {
+		return err
+	}
+
+	build, _ := cmd.Flags().GetBool("build")
+	recreate, _ := cmd.Flags().GetBool("recreate")
+
+	client := target.GetClient()
+	if client == nil {
+		return fmt.Errorf("no cilod client available for remote target")
+	}
+
+	opts := cilod.UpOptions{
+		Build:    build,
+		Recreate: recreate,
+	}
+
+	fmt.Printf("Starting environment %s/%s on %s...\n", project, name, target.GetMachine())
+
+	if err := client.UpEnvironment(name, opts); err != nil {
+		return fmt.Errorf("failed to start environment on remote machine: %w", err)
+	}
+
+	fmt.Printf("✓ Environment %s/%s started on %s\n", project, name, target.GetMachine())
+	return nil
+}
+
+// downRemote handles the down command for a remote machine via cilod
+func downRemote(cmd *cobra.Command, args []string, target Target) error {
+	project, name, err := getProjectAndEnv(cmd, args)
+	if err != nil {
+		return err
+	}
+
+	client := target.GetClient()
+	if client == nil {
+		return fmt.Errorf("no cilod client available for remote target")
+	}
+
+	fmt.Printf("Stopping environment %s/%s on %s...\n", project, name, target.GetMachine())
+
+	if err := client.DownEnvironment(name); err != nil {
+		return fmt.Errorf("failed to stop environment on remote machine: %w", err)
+	}
+
+	fmt.Printf("✓ Environment %s/%s stopped on %s\n", project, name, target.GetMachine())
+	return nil
+}
+
+// destroyRemote handles the destroy command for a remote machine via cilod
+func destroyRemote(cmd *cobra.Command, args []string, target Target) error {
+	project, name, err := getProjectAndEnv(cmd, args)
+	if err != nil {
+		return err
+	}
+
+	force, _ := cmd.Flags().GetBool("force")
+
+	if !force {
+		fmt.Printf("Are you sure you want to destroy %s in project %s on %s? [y/N] ", name, project, target.GetMachine())
+		var response string
+		fmt.Scanln(&response)
+		if strings.ToLower(response) != "y" && strings.ToLower(response) != "yes" {
+			fmt.Println("Cancelled")
+			return nil
+		}
+	}
+
+	client := target.GetClient()
+	if client == nil {
+		return fmt.Errorf("no cilod client available for remote target")
+	}
+
+	fmt.Printf("Destroying environment %s/%s on %s...\n", project, name, target.GetMachine())
+
+	if err := client.DestroyEnvironment(name); err != nil {
+		return fmt.Errorf("failed to destroy environment on remote machine: %w", err)
+	}
+
+	fmt.Printf("✓ Environment %s/%s destroyed on %s\n", project, name, target.GetMachine())
+	return nil
 }

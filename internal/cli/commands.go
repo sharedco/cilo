@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,6 +143,15 @@ var logsCmd = &cobra.Command{
 	Short: "Show logs for an environment or service",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		target, err := resolveTarget(cmd)
+		if err != nil {
+			return err
+		}
+
+		if target.IsRemote() {
+			return logsRemote(cmd, args, target)
+		}
+
 		project, name, err := getProjectAndEnv(cmd, args)
 		if err != nil {
 			return err
@@ -172,6 +182,15 @@ var execCmd = &cobra.Command{
 	Short: "Execute a command in a service container",
 	Args:  cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		target, err := resolveTarget(cmd)
+		if err != nil {
+			return err
+		}
+
+		if target.IsRemote() {
+			return execRemote(cmd, args, target)
+		}
+
 		project, name, err := getProjectAndEnv(cmd, args)
 		if err != nil {
 			return err
@@ -344,4 +363,67 @@ func contains(slice []string, value string) bool {
 		}
 	}
 	return false
+}
+
+// logsRemote handles the logs command for a remote machine via cilod
+func logsRemote(cmd *cobra.Command, args []string, target Target) error {
+	name := args[0]
+	var service string
+	if len(args) > 1 {
+		service = args[1]
+	}
+
+	follow, _ := cmd.Flags().GetBool("follow")
+
+	client := target.GetClient()
+	if client == nil {
+		return fmt.Errorf("no cilod client available for remote target")
+	}
+
+	fmt.Printf("Streaming logs for %s", name)
+	if service != "" {
+		fmt.Printf("/%s", service)
+	}
+	fmt.Printf(" on %s", target.GetMachine())
+	if follow {
+		fmt.Printf(" (following)")
+	}
+	fmt.Printf("...\n")
+
+	reader, err := client.StreamLogs(name, service)
+	if err != nil {
+		return fmt.Errorf("failed to stream logs from remote: %w", err)
+	}
+	defer reader.Close()
+
+	// Copy logs to stdout
+	_, err = io.Copy(os.Stdout, reader)
+	return err
+}
+
+// execRemote handles the exec command for a remote machine via cilod
+func execRemote(cmd *cobra.Command, args []string, target Target) error {
+	name := args[0]
+	service := args[1]
+	var command []string
+	if len(args) > 2 {
+		command = args[2:]
+	} else {
+		command = []string{"sh"}
+	}
+
+	client := target.GetClient()
+	if client == nil {
+		return fmt.Errorf("no cilod client available for remote target")
+	}
+
+	fmt.Printf("Executing '%s' in %s/%s on %s...\n", command, name, service, target.GetMachine())
+
+	// For now, use the Exec method which is a stub
+	// Full WebSocket implementation with bidirectional TTY will be in Task 11
+	if err := client.Exec(name, service, command); err != nil {
+		return fmt.Errorf("failed to execute command on remote: %w", err)
+	}
+
+	return nil
 }
