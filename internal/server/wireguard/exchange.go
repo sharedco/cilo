@@ -59,24 +59,13 @@ func NewExchange(store *Store) *Exchange {
 // RegisterPeer adds a new peer to a machine's WireGuard configuration
 // Returns the machine's WG public key and endpoint for the client to connect
 func (e *Exchange) RegisterPeer(ctx context.Context, machineInfo MachineInfo, peer PeerRegistration) (*PeerConfig, error) {
+	if e.store == nil {
+		return nil, fmt.Errorf("wireguard store not configured")
+	}
+
 	// Validate peer public key
 	if peer.PublicKey == "" {
 		return nil, fmt.Errorf("peer public key is required")
-	}
-
-	// Allocate IP if not provided
-	assignedIP := peer.AssignedIP
-	if assignedIP == "" {
-		ip, err := e.AllocatePeerIP(ctx, machineInfo.ID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to allocate peer IP: %w", err)
-		}
-		assignedIP = ip
-	}
-
-	// Validate assigned IP is in peer subnet
-	if !e.peerSubnet.Contains(net.ParseIP(assignedIP)) {
-		return nil, fmt.Errorf("assigned IP %s is not in peer subnet %s", assignedIP, e.peerSubnet.String())
 	}
 
 	// Check if peer already exists
@@ -91,7 +80,31 @@ func (e *Exchange) RegisterPeer(ctx context.Context, machineInfo MachineInfo, pe
 		return e.buildPeerConfig(machineInfo, existingPeer.AssignedIP), nil
 	}
 
-	// Create new peer record
+	// Serialize peer IP allocation per machine to avoid duplicate (machine_id, assigned_ip)
+	// under concurrent RegisterPeer calls.
+	tx, err := e.store.db.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)", machineInfo.ID); err != nil {
+		return nil, fmt.Errorf("acquire machine lock: %w", err)
+	}
+
+	assignedIP := peer.AssignedIP
+	if assignedIP == "" {
+		ip, err := e.store.GetNextPeerIPTx(ctx, tx, machineInfo.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to allocate peer IP: %w", err)
+		}
+		assignedIP = ip
+	}
+
+	if !e.peerSubnet.Contains(net.ParseIP(assignedIP)) {
+		return nil, fmt.Errorf("assigned IP %s is not in peer subnet %s", assignedIP, e.peerSubnet.String())
+	}
+
 	now := time.Now()
 	newPeer := &Peer{
 		MachineID:     machineInfo.ID,
@@ -103,11 +116,14 @@ func (e *Exchange) RegisterPeer(ctx context.Context, machineInfo MachineInfo, pe
 		LastSeen:      now,
 	}
 
-	if err := e.store.CreatePeer(ctx, newPeer); err != nil {
+	if err := e.store.CreatePeerTx(ctx, tx, newPeer); err != nil {
 		return nil, fmt.Errorf("failed to create peer: %w", err)
 	}
 
-	// Return peer configuration
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+
 	return e.buildPeerConfig(machineInfo, assignedIP), nil
 }
 

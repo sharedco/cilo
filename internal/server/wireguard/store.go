@@ -6,12 +6,14 @@ package wireguard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -63,6 +65,41 @@ func (s *Store) CreatePeer(ctx context.Context, peer *Peer) error {
 	}
 
 	return nil
+}
+
+func (s *Store) CreatePeerTx(ctx context.Context, tx pgx.Tx, peer *Peer) error {
+	if peer.ID == "" {
+		peer.ID = uuid.New().String()
+	}
+
+	query := `
+		INSERT INTO wireguard_peers (id, machine_id, environment_id, user_id, public_key, assigned_ip, connected_at, last_seen)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`
+
+	_, err := tx.Exec(ctx, query,
+		peer.ID,
+		peer.MachineID,
+		peer.EnvironmentID,
+		peer.UserID,
+		peer.PublicKey,
+		peer.AssignedIP,
+		peer.ConnectedAt,
+		peer.LastSeen,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create peer: %w", err)
+	}
+
+	return nil
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return false
+	}
+	return pgErr.Code == "23505"
 }
 
 // GetPeer retrieves a peer by public key
@@ -266,6 +303,50 @@ func (s *Store) GetNextPeerIP(ctx context.Context, machineID string) (string, er
 		}
 
 		// Increment IP
+		ip = incrementIP(ip)
+	}
+}
+
+func (s *Store) GetNextPeerIPTx(ctx context.Context, tx pgx.Tx, machineID string) (string, error) {
+	_, peerSubnet, err := net.ParseCIDR("10.225.0.0/16")
+	if err != nil {
+		return "", fmt.Errorf("failed to parse peer subnet: %w", err)
+	}
+
+	query := `
+		SELECT assigned_ip::TEXT
+		FROM wireguard_peers
+		WHERE machine_id = $1
+		ORDER BY assigned_ip
+	`
+
+	rows, err := tx.Query(ctx, query, machineID)
+	if err != nil {
+		return "", fmt.Errorf("failed to query existing IPs: %w", err)
+	}
+	defer rows.Close()
+
+	usedIPs := make(map[string]bool)
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err != nil {
+			return "", fmt.Errorf("failed to scan IP: %w", err)
+		}
+		usedIPs[ip] = true
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("error iterating IPs: %w", err)
+	}
+
+	ip := net.ParseIP("10.225.0.1")
+	for {
+		if !peerSubnet.Contains(ip) {
+			return "", fmt.Errorf("no available IPs in peer subnet")
+		}
+		ipStr := ip.String()
+		if !usedIPs[ipStr] {
+			return ipStr, nil
+		}
 		ip = incrementIP(ip)
 	}
 }
