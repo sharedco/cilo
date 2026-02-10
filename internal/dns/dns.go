@@ -68,8 +68,8 @@ func UpdateDNSFromState(state *models.State) error {
 		return fmt.Errorf("failed to rename DNS config: %w", err)
 	}
 
-	// Graceful reload with SIGHUP
-	return reloadDNSGraceful()
+	// Restart dnsmasq to ensure new config is loaded (more reliable than SIGHUP)
+	return restartDNSForReload()
 }
 
 // UpdateDNS updates DNS entries for an environment (deprecated - use UpdateDNSFromState)
@@ -208,6 +208,27 @@ func reloadDNSGraceful() error {
 	}
 
 	return nil
+}
+
+// restartDNSForReload stops and restarts dnsmasq to ensure config is reloaded
+// This is more reliable than SIGHUP for address= entries
+func restartDNSForReload() error {
+	dnsDir := getDNSDir()
+	pidPath := filepath.Join(dnsDir, dnsPidFile)
+
+	data, err := os.ReadFile(pidPath)
+	if err == nil {
+		pid := strings.TrimSpace(string(data))
+		pidInt := 0
+		fmt.Sscanf(pid, "%d", &pidInt)
+		if pidInt > 0 {
+			syscall.Kill(pidInt, syscall.SIGTERM)
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	_ = os.Remove(pidPath)
+	return startDNS()
 }
 
 func processExists(pid int) bool {
