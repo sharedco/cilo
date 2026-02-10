@@ -415,7 +415,7 @@ func (m *EnvironmentManager) getContainerIP(ctx context.Context, containerName, 
 	ciloNetworkName := fmt.Sprintf("cilo_%s", envName)
 
 	cmd := exec.CommandContext(ctx, "docker", "inspect",
-		"--format", fmt.Sprintf("{{range .NetworkSettings.Networks}}{{if eq .Name %q}}{{.IPAddress}}{{end}}{{end}}", ciloNetworkName),
+		"--format", fmt.Sprintf("{{(index .NetworkSettings.Networks %q).IPAddress}}", ciloNetworkName),
 		containerName)
 
 	var stdout bytes.Buffer
