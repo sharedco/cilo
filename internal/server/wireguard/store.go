@@ -68,7 +68,7 @@ func (s *Store) CreatePeer(ctx context.Context, peer *Peer) error {
 // GetPeer retrieves a peer by public key
 func (s *Store) GetPeer(ctx context.Context, publicKey string) (*Peer, error) {
 	query := `
-		SELECT id, machine_id, environment_id, user_id, public_key, assigned_ip, connected_at, last_seen
+		SELECT id, machine_id, environment_id, user_id, public_key, assigned_ip::TEXT, connected_at, last_seen
 		FROM wireguard_peers
 		WHERE public_key = $1
 	`
@@ -97,7 +97,7 @@ func (s *Store) GetPeer(ctx context.Context, publicKey string) (*Peer, error) {
 // GetPeersByMachine retrieves all peers connected to a machine
 func (s *Store) GetPeersByMachine(ctx context.Context, machineID string) ([]*Peer, error) {
 	query := `
-		SELECT id, machine_id, environment_id, user_id, public_key, assigned_ip, connected_at, last_seen
+		SELECT id, machine_id, environment_id, user_id, public_key, assigned_ip::TEXT, connected_at, last_seen
 		FROM wireguard_peers
 		WHERE machine_id = $1
 		ORDER BY connected_at DESC
@@ -138,7 +138,7 @@ func (s *Store) GetPeersByMachine(ctx context.Context, machineID string) ([]*Pee
 // GetPeersByEnvironment retrieves all peers connected to an environment
 func (s *Store) GetPeersByEnvironment(ctx context.Context, environmentID string) ([]*Peer, error) {
 	query := `
-		SELECT id, machine_id, environment_id, user_id, public_key, assigned_ip, connected_at, last_seen
+		SELECT id, machine_id, environment_id, user_id, public_key, assigned_ip::TEXT, connected_at, last_seen
 		FROM wireguard_peers
 		WHERE environment_id = $1
 		ORDER BY connected_at DESC
@@ -224,8 +224,9 @@ func (s *Store) GetNextPeerIP(ctx context.Context, machineID string) (string, er
 	}
 
 	// Get all existing peer IPs for this machine
+	// Cast INET to TEXT for Go string scanning
 	query := `
-		SELECT assigned_ip
+		SELECT assigned_ip::TEXT
 		FROM wireguard_peers
 		WHERE machine_id = $1
 		ORDER BY assigned_ip
