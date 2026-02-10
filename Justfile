@@ -123,7 +123,7 @@ server-up:
 server-down:
   cd deploy/self-host && docker compose down
 
-# Clean up server completely (containers, volumes, envs, agent)
+# Clean up server completely (containers, volumes, envs, agent, wireguard)
 server-clean:
   @echo "Cleaning up Cilo Server..."
   @echo "Stopping containers..."
@@ -135,8 +135,17 @@ server-clean:
   docker network ls --format "{{{{.Name}}}}" | grep -E "^[a-f0-9-]{36}_default$$" | xargs -r docker network rm 2>/dev/null || true
   @echo "Stopping cilo-agent..."
   sudo pkill -x cilo-agent 2>/dev/null || true
+  @echo "Cleaning up WireGuard..."
+  sudo ip link del wg0 2>/dev/null || true
+  sudo iptables -D DOCKER-USER -i wg0 -j ACCEPT 2>/dev/null || true
+  sudo iptables -D DOCKER-USER -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+  sudo iptables -D FORWARD -i wg0 -j ACCEPT 2>/dev/null || true
+  sudo iptables -D FORWARD -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+  sudo iptables -t nat -D POSTROUTING -s 10.225.0.0/16 -o docker0 -j MASQUERADE 2>/dev/null || true
   @echo "Cleaning up workspace..."
   sudo rm -rf /var/cilo/envs/* 2>/dev/null || true
+  @echo "Cleaning up .env..."
+  rm -f deploy/self-host/.env 2>/dev/null || true
   @echo "✓ Server cleaned up"
 
 # View server logs

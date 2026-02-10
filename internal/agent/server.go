@@ -96,6 +96,9 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
+	if s.wgManager != nil {
+		s.wgManager.cleanupForwarding(ctx)
+	}
 	return s.http.Shutdown(ctx)
 }
 

@@ -145,7 +145,7 @@ func (h *WireGuardHandler) HandleWireGuardExchange(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if err := h.notifyAgentAddPeer(r.Context(), req.MachineID, req.PublicKey, peerConfig.AssignedIP, machineInfo.EnvironmentSubnet); err != nil {
+	if err := h.notifyAgentAddPeer(r.Context(), req.MachineID, req.PublicKey, peerConfig.AssignedIP); err != nil {
 		fmt.Printf("Warning: failed to notify agent to add peer: %v\n", err)
 	}
 
@@ -250,7 +250,7 @@ func (h *WireGuardHandler) HandleWireGuardStatus(w http.ResponseWriter, r *http.
 	})
 }
 
-func (h *WireGuardHandler) notifyAgentAddPeer(ctx context.Context, machineID, publicKey, assignedIP, environmentSubnet string) error {
+func (h *WireGuardHandler) notifyAgentAddPeer(ctx context.Context, machineID, publicKey, assignedIP string) error {
 	machine, err := h.store.GetMachine(ctx, machineID)
 	if err != nil {
 		return fmt.Errorf("failed to get machine: %w", err)
@@ -264,7 +264,10 @@ func (h *WireGuardHandler) notifyAgentAddPeer(ctx context.Context, machineID, pu
 	agentAddr := extractAgentAddress(agentHost)
 	agentClient := agent.NewClient(agentAddr)
 
-	allowedIPs := fmt.Sprintf("%s/32,%s", assignedIP, environmentSubnet)
+	// Only include the peer's own IP in allowed-ips on the server side.
+	// The environmentSubnet (10.224.0.0/16) must NOT be here — that would tell
+	// WireGuard to route Docker container traffic to the client instead of locally.
+	allowedIPs := fmt.Sprintf("%s/32", assignedIP)
 	req := agent.AddPeerRequest{
 		PublicKey:  publicKey,
 		AllowedIPs: allowedIPs,
