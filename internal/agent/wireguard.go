@@ -89,10 +89,6 @@ func (m *WireGuardManager) EnsureInterface(ctx context.Context) error {
 		return fmt.Errorf("failed to bring up interface: %w", err)
 	}
 
-	if err := m.setupForwarding(ctx); err != nil {
-		return fmt.Errorf("failed to setup forwarding: %w", err)
-	}
-
 	return nil
 }
 
@@ -132,58 +128,6 @@ func (m *WireGuardManager) bringUp(ctx context.Context) error {
 		return fmt.Errorf("ip link set up: %w", err)
 	}
 	return nil
-}
-
-func (m *WireGuardManager) setupForwarding(ctx context.Context) error {
-	if err := exec.CommandContext(ctx, "sysctl", "-w", "net.ipv4.ip_forward=1").Run(); err != nil {
-		return fmt.Errorf("enable ip forwarding: %w", err)
-	}
-
-	rules := [][]string{
-		{"-I", "DOCKER-USER", "-i", m.interfaceName, "-j", "ACCEPT"},
-		{"-I", "DOCKER-USER", "-o", m.interfaceName, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
-		{"-A", "FORWARD", "-i", m.interfaceName, "-j", "ACCEPT"},
-		{"-A", "FORWARD", "-o", m.interfaceName, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
-	}
-
-	for _, rule := range rules {
-		checkArgs := make([]string, len(rule))
-		copy(checkArgs, rule)
-		if checkArgs[0] == "-I" || checkArgs[0] == "-A" {
-			checkArgs[0] = "-C"
-		}
-		if exec.CommandContext(ctx, "iptables", checkArgs...).Run() == nil {
-			continue
-		}
-		if err := exec.CommandContext(ctx, "iptables", rule...).Run(); err != nil {
-			return fmt.Errorf("iptables %v: %w", rule, err)
-		}
-	}
-
-	natRule := []string{"-t", "nat", "-A", "POSTROUTING", "-s", "10.225.0.0/16", "-o", "docker0", "-j", "MASQUERADE"}
-	natCheck := []string{"-t", "nat", "-C", "POSTROUTING", "-s", "10.225.0.0/16", "-o", "docker0", "-j", "MASQUERADE"}
-	if exec.CommandContext(ctx, "iptables", natCheck...).Run() != nil {
-		if err := exec.CommandContext(ctx, "iptables", natRule...).Run(); err != nil {
-			fmt.Printf("Warning: MASQUERADE on docker0 failed (may use bridge network): %v\n", err)
-		}
-	}
-
-	return nil
-}
-
-func (m *WireGuardManager) cleanupForwarding(ctx context.Context) {
-	rules := [][]string{
-		{"-D", "DOCKER-USER", "-i", m.interfaceName, "-j", "ACCEPT"},
-		{"-D", "DOCKER-USER", "-o", m.interfaceName, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
-		{"-D", "FORWARD", "-i", m.interfaceName, "-j", "ACCEPT"},
-		{"-D", "FORWARD", "-o", m.interfaceName, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"},
-	}
-	for _, rule := range rules {
-		exec.CommandContext(ctx, "iptables", rule...).Run()
-	}
-
-	natRule := []string{"-t", "nat", "-D", "POSTROUTING", "-s", "10.225.0.0/16", "-o", "docker0", "-j", "MASQUERADE"}
-	exec.CommandContext(ctx, "iptables", natRule...).Run()
 }
 
 // AddPeer adds a peer to the WireGuard interface

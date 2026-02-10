@@ -7,6 +7,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -347,8 +348,10 @@ func runCloudUpMain(envName, absPath string, spec *engine.EnvironmentSpec, build
 		fmt.Printf("  ⚠ Failed to get environment details: %v\n", err)
 	}
 
+	proxyIP := deriveProxyIP(wgResp.AllowedIPs)
+
 	fmt.Println("→ Configuring DNS...")
-	if err := configureCloudDNS(envName, spec.Project, env); err != nil {
+	if err := configureCloudDNS(envName, spec.Project, proxyIP, env); err != nil {
 		fmt.Printf("  ⚠ DNS configuration warning: %v\n", err)
 		fmt.Println("    You may need to manually configure /etc/hosts")
 	} else {
@@ -428,21 +431,18 @@ func waitForEnvironmentReady(ctx context.Context, client *cloud.Client, envID st
 	return fmt.Errorf("timeout waiting for environment (5 minutes)")
 }
 
-func configureCloudDNS(envName, project string, env *cloud.Environment) error {
+func configureCloudDNS(envName, project, proxyIP string, env *cloud.Environment) error {
 	var hostsEntries []string
 	dnsSuffix := ".test"
 
 	if env != nil && len(env.Services) > 0 {
 		for _, svc := range env.Services {
-			if svc.IP != "" {
-				hostname := fmt.Sprintf("%s.%s%s", svc.Name, envName, dnsSuffix)
-				hostsEntries = append(hostsEntries, fmt.Sprintf("%s %s", svc.IP, hostname))
-			}
+			hostname := fmt.Sprintf("%s.%s%s", svc.Name, envName, dnsSuffix)
+			hostsEntries = append(hostsEntries, fmt.Sprintf("%s %s", proxyIP, hostname))
 		}
 		if len(env.Services) > 0 {
-			apexIP := env.Services[0].IP
 			apexHostname := fmt.Sprintf("%s.%s%s", project, envName, dnsSuffix)
-			hostsEntries = append(hostsEntries, fmt.Sprintf("%s %s", apexIP, apexHostname))
+			hostsEntries = append(hostsEntries, fmt.Sprintf("%s %s", proxyIP, apexHostname))
 		}
 	}
 
@@ -478,7 +478,7 @@ func configureCloudDNS(envName, project string, env *cloud.Environment) error {
 		for _, svc := range env.Services {
 			cloudEnv.Services[svc.Name] = &models.Service{
 				Name:      svc.Name,
-				IP:        svc.IP,
+				IP:        proxyIP,
 				IsIngress: false,
 			}
 		}
@@ -504,6 +504,22 @@ func configureCloudDNS(envName, project string, env *cloud.Environment) error {
 	}
 
 	return nil
+}
+
+func deriveProxyIP(allowedIPs []string) string {
+	for _, cidr := range allowedIPs {
+		if strings.HasSuffix(cidr, "/16") && strings.HasPrefix(cidr, "10.225") {
+			ip, _, err := net.ParseCIDR(cidr)
+			if err == nil {
+				ip4 := ip.To4()
+				if ip4 != nil {
+					ip4[3] = 100
+					return ip4.String()
+				}
+			}
+		}
+	}
+	return "10.225.0.100"
 }
 
 func fallbackSync(ctx context.Context, localPath, remoteIP, envID string) error {

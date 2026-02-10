@@ -24,13 +24,15 @@ import (
 
 // EnvironmentManager handles Docker Compose operations
 type EnvironmentManager struct {
-	workspaceRoot string // e.g., /var/cilo/workspaces
+	workspaceRoot string    // e.g., /var/cilo/workspaces
+	proxy         *EnvProxy // reverse proxy for routing HTTP traffic
 }
 
 // NewEnvironmentManager creates a new environment manager
-func NewEnvironmentManager(workspaceRoot string) *EnvironmentManager {
+func NewEnvironmentManager(workspaceRoot string, proxy *EnvProxy) *EnvironmentManager {
 	return &EnvironmentManager{
 		workspaceRoot: workspaceRoot,
+		proxy:         proxy,
 	}
 }
 
@@ -111,6 +113,16 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 		return nil, fmt.Errorf("failed to get service IPs: %w", err)
 	}
 
+	// Register proxy routes for each service
+	if m.proxy != nil {
+		for name, ip := range services {
+			port := m.detectContainerPort(ctx, fmt.Sprintf("cilo_%s_%s", req.EnvName, name))
+			hostname := fmt.Sprintf("%s.%s.test", name, req.EnvName)
+			target := fmt.Sprintf("http://%s:%s", ip, port)
+			m.proxy.AddRoute(hostname, target)
+		}
+	}
+
 	return &UpResponse{
 		Status:   "running",
 		Services: services,
@@ -138,6 +150,10 @@ func (m *EnvironmentManager) Down(ctx context.Context, envName string) error {
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("docker compose down failed: %w\nstderr: %s", err, stderr.String())
+	}
+
+	if m.proxy != nil {
+		m.proxy.RemoveRoutesForEnv(envName)
 	}
 
 	log.Printf("Environment %s stopped successfully", envName)
@@ -256,6 +272,10 @@ func (m *EnvironmentManager) Destroy(ctx context.Context, envName string) error 
 		if err := cmd.Run(); err != nil {
 			log.Printf("Warning: docker compose down failed: %v", err)
 		}
+	}
+
+	if m.proxy != nil {
+		m.proxy.RemoveRoutesForEnv(envName)
 	}
 
 	// Remove network
@@ -411,6 +431,25 @@ func (m *EnvironmentManager) getContainerIP(ctx context.Context, containerName, 
 	}
 
 	return ip, nil
+}
+
+// detectContainerPort detects the exposed port of a container
+func (m *EnvironmentManager) detectContainerPort(ctx context.Context, containerName string) string {
+	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format",
+		"{{range $port, $_ := .Config.ExposedPorts}}{{$port}} {{end}}", containerName)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return "80"
+	}
+	ports := strings.Fields(strings.TrimSpace(stdout.String()))
+	for _, p := range ports {
+		parts := strings.SplitN(p, "/", 2)
+		if len(parts) > 0 && parts[0] != "" {
+			return parts[0]
+		}
+	}
+	return "80"
 }
 
 // validateEnvName ensures environment name contains only safe characters

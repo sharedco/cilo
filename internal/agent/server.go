@@ -7,7 +7,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -22,6 +24,7 @@ type Server struct {
 	http       *http.Server
 	envManager *EnvironmentManager
 	wgManager  *WireGuardManager
+	proxy      *EnvProxy
 }
 
 func NewServer(cfg *config.Config) (*Server, error) {
@@ -40,11 +43,22 @@ func NewServer(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to create WireGuard interface: %w", err)
 	}
 
+	// Start reverse proxy on WireGuard IP
+	var proxy *EnvProxy
+	wgIP := strings.Split(cfg.WGAddress, "/")[0]
+	proxyAddr := wgIP + ":80"
+	proxy, err = NewEnvProxy(proxyAddr)
+	if err != nil {
+		log.Printf("Warning: failed to start reverse proxy on %s: %v", proxyAddr, err)
+		proxy = nil
+	}
+
 	s := &Server{
 		router:     chi.NewRouter(),
 		config:     cfg,
-		envManager: NewEnvironmentManager(cfg.WorkspaceDir),
+		envManager: NewEnvironmentManager(cfg.WorkspaceDir, proxy),
 		wgManager:  wgMgr,
+		proxy:      proxy,
 	}
 
 	s.setupMiddleware()
@@ -96,8 +110,8 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.wgManager != nil {
-		s.wgManager.cleanupForwarding(ctx)
+	if s.proxy != nil {
+		s.proxy.Close()
 	}
 	return s.http.Shutdown(ctx)
 }

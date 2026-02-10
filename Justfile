@@ -138,11 +138,6 @@ server-clean:
   sudo pkill -x cilo-agent 2>/dev/null || true
   @echo "Cleaning up WireGuard..."
   sudo ip link del wg0 2>/dev/null || true
-  sudo iptables -D DOCKER-USER -i wg0 -j ACCEPT 2>/dev/null || true
-  sudo iptables -D DOCKER-USER -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
-  sudo iptables -D FORWARD -i wg0 -j ACCEPT 2>/dev/null || true
-  sudo iptables -D FORWARD -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
-  sudo iptables -t nat -D POSTROUTING -s 10.225.0.0/16 -o docker0 -j MASQUERADE 2>/dev/null || true
   @echo "Cleaning up workspace..."
   sudo rm -rf /var/cilo/envs/* 2>/dev/null || true
   @echo "Cleaning up .env..."
