@@ -58,7 +58,7 @@ MACHINE_NAME="$(hostname)-self"
 cd "$PROJECT_ROOT/deploy/self-host"
 if [ ! -f .env ]; then
   POSTGRES_PASSWORD=$(openssl rand -hex 32)
-  POSTGRES_PASSWORD_URLENCODED=$(python3 -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["POSTGRES_PASSWORD"], safe=""))')
+  POSTGRES_PASSWORD_URLENCODED=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$POSTGRES_PASSWORD")
   cat > .env << EOF
  CILO_DOMAIN=localhost
  POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
