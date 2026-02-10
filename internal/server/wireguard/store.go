@@ -94,12 +94,15 @@ func (s *Store) CreatePeerTx(ctx context.Context, tx pgx.Tx, peer *Peer) error {
 	return nil
 }
 
-func isUniqueViolation(err error) bool {
+func uniqueConstraintName(err error) string {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
-		return false
+		return ""
 	}
-	return pgErr.Code == "23505"
+	if pgErr.Code != "23505" {
+		return ""
+	}
+	return pgErr.ConstraintName
 }
 
 // GetPeer retrieves a peer by public key

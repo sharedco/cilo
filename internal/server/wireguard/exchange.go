@@ -101,22 +101,45 @@ func (e *Exchange) RegisterPeer(ctx context.Context, machineInfo MachineInfo, pe
 		assignedIP = ip
 	}
 
-	if !e.peerSubnet.Contains(net.ParseIP(assignedIP)) {
-		return nil, fmt.Errorf("assigned IP %s is not in peer subnet %s", assignedIP, e.peerSubnet.String())
-	}
+	// Retry insert on unique constraint violation (machine_id, assigned_ip).
+	for attempts := 0; attempts < 50; attempts++ {
+		if !e.peerSubnet.Contains(net.ParseIP(assignedIP)) {
+			return nil, fmt.Errorf("assigned IP %s is not in peer subnet %s", assignedIP, e.peerSubnet.String())
+		}
 
-	now := time.Now()
-	newPeer := &Peer{
-		MachineID:     machineInfo.ID,
-		EnvironmentID: peer.EnvironmentID,
-		UserID:        peer.UserID,
-		PublicKey:     peer.PublicKey,
-		AssignedIP:    assignedIP,
-		ConnectedAt:   now,
-		LastSeen:      now,
-	}
+		now := time.Now()
+		newPeer := &Peer{
+			MachineID:     machineInfo.ID,
+			EnvironmentID: peer.EnvironmentID,
+			UserID:        peer.UserID,
+			PublicKey:     peer.PublicKey,
+			AssignedIP:    assignedIP,
+			ConnectedAt:   now,
+			LastSeen:      now,
+		}
 
-	if err := e.store.CreatePeerTx(ctx, tx, newPeer); err != nil {
+		err := e.store.CreatePeerTx(ctx, tx, newPeer)
+		if err == nil {
+			break
+		}
+
+		constraint := uniqueConstraintName(err)
+		if constraint == "idx_wireguard_peers_machine_ip" {
+			ip := net.ParseIP(assignedIP)
+			if ip == nil {
+				return nil, fmt.Errorf("failed to parse assigned IP %q", assignedIP)
+			}
+			assignedIP = incrementIP(ip).String()
+			continue
+		}
+		if constraint == "wireguard_peers_public_key_key" || constraint == "idx_wireguard_peers_public_key" {
+			existingPeer, getErr := e.store.GetPeer(ctx, peer.PublicKey)
+			if getErr == nil {
+				_ = e.store.UpdateLastSeen(ctx, peer.PublicKey)
+				return e.buildPeerConfig(machineInfo, existingPeer.AssignedIP), nil
+			}
+		}
+
 		return nil, fmt.Errorf("failed to create peer: %w", err)
 	}
 
