@@ -70,12 +70,12 @@ Replace the bifurcated local/cloud CLI with a unified command set where remote t
 - cilod client library for CLI ↔ cilod communication
 
 ### Definition of Done
-- [ ] `cilo run opencode feat-auth --on devbox` creates env on remote machine (test: e2e_remote_test.go)
-- [ ] `cilo ls` shows both local and connected machine environments (test: unified_ls_test.go)
-- [ ] `cilo connect devbox.example.com` establishes WireGuard tunnel (test: connect_test.go)
-- [ ] All local commands work unchanged without `--on` flag (test: regression_test.go)
-- [ ] No `cilo cloud` subcommand exists (test: `cilo cloud` returns "unknown command")
-- [ ] `go test ./...` passes with zero failures
+- [x] `cilo run opencode feat-auth --on devbox` creates env on remote machine (test: e2e_remote_test.go)
+- [x] `cilo ls` shows both local and connected machine environments (test: unified_ls_test.go)
+- [x] `cilo connect devbox.example.com` establishes WireGuard tunnel (test: connect_test.go)
+- [x] All local commands work unchanged without `--on` flag (test: regression_test.go)
+- [x] No `cilo cloud` subcommand exists (test: `cilo cloud` returns "unknown command")
+- [x] `go test ./...` passes with zero failures
 
 ### Must Have
 - Unified CLI surface (no `cilo cloud` namespace)
@@ -201,7 +201,7 @@ Wave 5 (After Wave 4):
 
 ## TODOs
 
-- [ ] 1. Delete Old Cloud Code + Cleanup Guide
+- [x] 1. Delete Old Cloud Code + Cleanup Guide
 
   **What to do**:
   - RED: Write test `TestNoCloudSubcommand` that asserts `cilo cloud` returns "unknown command" error
@@ -328,7 +328,7 @@ Wave 5 (After Wave 4):
 
 ---
 
-- [ ] 2. Design cilod Auth Protocol + API Specification
+- [x] 2. Design cilod Auth Protocol + API Specification
 
   **What to do**:
   - RED: Write test `TestSSHKeyAuth` in `internal/agent/auth_test.go` that:
@@ -441,7 +441,7 @@ Wave 5 (After Wave 4):
 
 ---
 
-- [ ] 3. Upgrade cilod with Full API Surface
+- [x] 3. Upgrade cilod with Full API Surface
 
   **What to do**:
   - RED: Write tests in `internal/agent/server_test.go` for each API endpoint:
@@ -545,7 +545,7 @@ Wave 5 (After Wave 4):
 
 ---
 
-- [ ] 4. Build cilod Client Library
+- [x] 4. Build cilod Client Library
 
   **What to do**:
   - RED: Write tests in `internal/cilod/client_test.go`:
@@ -623,7 +623,7 @@ Wave 5 (After Wave 4):
 
 ---
 
-- [ ] 5. Implement `cilo connect` / `cilo disconnect`
+- [x] 5. Implement `cilo connect` / `cilo disconnect`
 
   **What to do**:
   - RED: Write tests in `internal/cli/connect_test.go`:
@@ -737,7 +737,7 @@ Wave 5 (After Wave 4):
 
 ---
 
-- [ ] 6. Implement `cilo machines` Command
+- [x] 6. Implement `cilo machines` Command
 
   **What to do**:
   - RED: Write test `TestMachinesCommand` — asserts output format with 0, 1, and N connected machines
@@ -802,7 +802,7 @@ Wave 5 (After Wave 4):
 
 ---
 
-- [ ] 7. Add `--on` Flag Routing to Lifecycle Commands
+- [x] 7. Add `--on` Flag Routing to Lifecycle Commands
 
   **What to do**:
   - RED: Write tests:
@@ -905,7 +905,7 @@ Wave 5 (After Wave 4):
 
 ---
 
-- [ ] 8. Implement Workspace Sync for `--on` Operations
+- [x] 8. Implement Workspace Sync for `--on` Operations
 
   **What to do**:
   - RED: Write tests in `internal/sync/sync_test.go`:
@@ -957,7 +957,7 @@ Wave 5 (After Wave 4):
 
 ---
 
-- [ ] 9. Unify `cilo ls` to Show Local + Remote Environments
+- [x] 9. Unify `cilo ls` to Show Local + Remote Environments
 
   **What to do**:
   - RED: Write tests:
@@ -1013,7 +1013,7 @@ Wave 5 (After Wave 4):
 
 ---
 
-- [ ] 10. Remote DNS Integration
+- [x] 10. Remote DNS Integration
 
   **What to do**:
   - RED: Write tests in `internal/dns/remote_test.go`:
@@ -1066,7 +1066,7 @@ Wave 5 (After Wave 4):
 
 ---
 
-- [ ] 11. Remote Exec + Logs Streaming
+- [x] 11. Remote Exec + Logs Streaming
 
   **What to do**:
   - RED: Write tests:
@@ -1121,7 +1121,7 @@ Wave 5 (After Wave 4):
 
 ---
 
-- [ ] 12. Integration Tests + Regression Suite
+- [x] 12. Integration Tests + Regression Suite
 
   **What to do**:
   - Write comprehensive integration tests in `test/e2e/`:
@@ -1242,12 +1242,12 @@ cilo disconnect <host>            # Expected: tunnel torn down, DNS cleaned
 ```
 
 ### Final Checklist
-- [ ] No `cilo cloud` subcommand exists
-- [ ] `--on` flag works on: run, up, down, destroy, exec, logs
-- [ ] `cilo connect/disconnect/machines` commands work
-- [ ] `cilo ls` shows unified local + remote view
-- [ ] DNS resolves remote services
-- [ ] Workspace sync works for --on operations
-- [ ] All local commands work unchanged (regression)
-- [ ] TDD: all tests pass
-- [ ] `go vet ./...` clean
+- [x] No `cilo cloud` subcommand exists
+- [x] `--on` flag works on: run, up, down, destroy, exec, logs
+- [x] `cilo connect/disconnect/machines` commands work
+- [x] `cilo ls` shows unified local + remote view
+- [x] DNS resolves remote services
+- [x] Workspace sync works for --on operations
+- [x] All local commands work unchanged (regression)
+- [x] TDD: all tests pass
+- [x] `go vet ./...` clean
