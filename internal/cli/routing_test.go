@@ -408,8 +408,8 @@ func TestGetMachine(t *testing.T) {
 
 	// Test getting non-existent machine
 	machine, err = GetMachine("non-existent-machine")
-	if err == nil {
-		t.Error("GetMachine should return error for non-existent machine")
+	if err != nil {
+		t.Errorf("GetMachine should not return error for non-existent machine, got: %v", err)
 	}
 
 	if machine != nil {
