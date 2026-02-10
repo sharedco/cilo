@@ -57,14 +57,16 @@ MACHINE_NAME="$(hostname)-self"
 # Create env file
 cd "$PROJECT_ROOT/deploy/self-host"
 if [ ! -f .env ]; then
-  POSTGRES_PASSWORD=$(openssl rand -base64 32)
+  POSTGRES_PASSWORD=$(openssl rand -hex 32)
+  POSTGRES_PASSWORD_URLENCODED=$(python3 -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["POSTGRES_PASSWORD"], safe=""))')
   cat > .env << EOF
-CILO_DOMAIN=localhost
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-CILO_PROVIDER=manual
-CILO_BILLING_ENABLED=false
-CILO_METRICS_ENABLED=true
-CILO_AUTO_DESTROY_HOURS=8
+ CILO_DOMAIN=localhost
+ POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+ POSTGRES_PASSWORD_URLENCODED=${POSTGRES_PASSWORD_URLENCODED}
+ CILO_PROVIDER=manual
+ CILO_BILLING_ENABLED=false
+ CILO_METRICS_ENABLED=true
+ CILO_AUTO_DESTROY_HOURS=8
 EOF
   echo "✓ Created .env file"
 fi

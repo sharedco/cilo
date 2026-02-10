@@ -6,7 +6,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      - DATABASE_URL=postgres://cilo:${POSTGRES_PASSWORD}@postgres:5432/cilo?sslmode=disable
+      - DATABASE_URL=postgres://cilo:${POSTGRES_PASSWORD_URLENCODED}@postgres:5432/cilo?sslmode=disable
       - CILO_LISTEN_ADDR=:8080
       - CILO_PROVIDER=${CILO_PROVIDER:-manual}
       - HETZNER_API_TOKEN=${HETZNER_API_TOKEN:-}
