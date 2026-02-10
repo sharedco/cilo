@@ -1,17 +1,43 @@
-# Build cilo binary
+# Export version info for all builds
+export VERSION := `cat VERSION`
+export COMMIT := `git rev-parse --short HEAD 2>/dev/null || echo "unknown"`
+export BUILDTIME := `date -u +"%Y-%m-%dT%H:%M:%SZ"`
+
+# Show current version from VERSION file
+show-version:
+  @echo "Version: {{VERSION}}"
+  @echo "Commit:  {{COMMIT}}"
+  @echo "Build:   {{BUILDTIME}}"
+
+# Bump patch version (e.g., 0.2.1 -> 0.2.2)
+bump-version:
+  @current=$(cat VERSION); \
+  major=$(echo $current | cut -d. -f1); \
+  minor=$(echo $current | cut -d. -f2); \
+  patch=$(echo $current | cut -d. -f3); \
+  new_patch=$((patch + 1)); \
+  new_version="${major}.${minor}.${new_patch}"; \
+  echo "$new_version" > VERSION; \
+  echo "Bumped version: $current -> $new_version"
+
+# Build cilo binary (with version info)
 build:
-  go build -o cilo ./cmd/cilo
+  go build -ldflags "-X github.com/sharedco/cilo/internal/version.Version={{VERSION}} -X github.com/sharedco/cilo/internal/version.Commit={{COMMIT}} -X github.com/sharedco/cilo/internal/version.BuildTime={{BUILDTIME}}" -o cilo ./cmd/cilo
 
-# Build cilo-server binary
+# Build cilo-server binary (with version info)
 build-server:
-  go build -o cilo-server ./cmd/cilo-server
+  go build -ldflags "-X github.com/sharedco/cilo/internal/version.Version={{VERSION}} -X github.com/sharedco/cilo/internal/version.Commit={{COMMIT}} -X github.com/sharedco/cilo/internal/version.BuildTime={{BUILDTIME}}" -o cilo-server ./cmd/cilo-server
 
-# Build cilo-agent binary
+# Build cilo-agent binary (with version info)
 build-agent:
-  go build -o cilo-agent ./cmd/cilo-agent
+  go build -ldflags "-X github.com/sharedco/cilo/internal/version.Version={{VERSION}} -X github.com/sharedco/cilo/internal/version.Commit={{COMMIT}} -X github.com/sharedco/cilo/internal/version.BuildTime={{BUILDTIME}}" -o cilo-agent ./cmd/cilo-agent
 
-# Build all binaries
+# Build all binaries (with version info)
 build-all: build build-server build-agent
+
+# Build agent for Linux (cross-compile)
+build-agent-linux:
+  GOOS=linux GOARCH=amd64 go build -ldflags "-X github.com/sharedco/cilo/internal/version.Version={{VERSION}} -X github.com/sharedco/cilo/internal/version.Commit={{COMMIT}} -X github.com/sharedco/cilo/internal/version.BuildTime={{BUILDTIME}}" -o cilo-agent-linux ./cmd/cilo-agent
 
 # Quick dev build (no version info)
 dev:
@@ -28,9 +54,16 @@ install: build
   sudo cp cilo /usr/local/bin/
   @echo "Installed to /usr/local/bin/cilo"
 
-# Show current version
-version:
-  ./cilo version
+# Install cilo-agent to /usr/local/bin (requires sudo, forces rebuild)
+install-agent: build-agent
+  sudo pkill -x cilo-agent 2>/dev/null || true
+  sudo cp cilo-agent /usr/local/bin/
+  sudo chmod +x /usr/local/bin/cilo-agent
+  @echo "Installed cilo-agent to /usr/local/bin/cilo-agent"
+
+# Show version reported by cilo binary
+version: build
+  @./cilo --version
 
 # Run unit tests
 test *args:

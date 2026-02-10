@@ -6,6 +6,8 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -14,9 +16,18 @@ import (
 
 	"github.com/sharedco/cilo/internal/agent"
 	"github.com/sharedco/cilo/internal/agent/config"
+	"github.com/sharedco/cilo/internal/version"
 )
 
 func main() {
+	showVersion := flag.Bool("version", false, "Show version and exit")
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version.Info())
+		os.Exit(0)
+	}
+
 	cfg := config.Load()
 
 	srv, err := agent.NewServer(cfg)

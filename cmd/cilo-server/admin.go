@@ -18,6 +18,7 @@ import (
 	"github.com/sharedco/cilo/internal/server/auth"
 	"github.com/sharedco/cilo/internal/server/config"
 	"github.com/sharedco/cilo/internal/server/store"
+	"github.com/sharedco/cilo/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -27,6 +28,7 @@ var rootCmd = &cobra.Command{
 	Short: "Cilo server - Cloud API server for isolated development environments",
 	Long: `The Cilo server provides centralized environment management,
 WireGuard networking, and VM orchestration for remote Cilo environments.`,
+	Version: version.Info(),
 }
 
 // adminCmd is the parent command for admin operations

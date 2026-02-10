@@ -14,13 +14,8 @@ import (
 	"github.com/sharedco/cilo/internal/config"
 	"github.com/sharedco/cilo/internal/dns"
 	"github.com/sharedco/cilo/internal/state"
+	"github.com/sharedco/cilo/internal/version"
 	"github.com/spf13/cobra"
-)
-
-var (
-	version = "0.2.1"
-	commit  = "unknown"
-	date    = "unknown"
 )
 
 var rootCmd = &cobra.Command{
@@ -29,7 +24,7 @@ var rootCmd = &cobra.Command{
 	Long: `cilo creates isolated workspace environments from docker-compose projects.
 Each environment has its own mutable copy of the compose file, a unique DNS namespace,
 and runs on an isolated Docker network accessible via DNS names rather than ports.`,
-	Version: fmt.Sprintf("%s (commit: %s, built: %s)", version, commit, date),
+	Version: version.Info(),
 }
 
 func Execute() error {

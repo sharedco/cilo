@@ -113,9 +113,14 @@ Requires sudo.`,
 				continue
 			}
 			if strings.Contains(string(output), "10.225.0.") {
-				exec.Command("ifconfig", ifname, "down").Run()
+				exec.Command("ifconfig", ifname, "destroy").Run()
 			}
 		}
+		fmt.Println("done")
+
+		fmt.Print("  → Removing routes... ")
+		exec.Command("route", "delete", "-net", "10.224.0.0/16").Run()
+		exec.Command("route", "delete", "-net", "10.225.0.0/16").Run()
 		fmt.Println("done")
 
 		fmt.Println("✓ Tunnel cleaned up")
