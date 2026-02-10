@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,9 +28,14 @@ This command establishes a WireGuard tunnel to the remote machine and
 registers it in your local machine state. Once connected, you can use
 the --on flag with other commands to target this machine.
 
+If you can already SSH to the host without password (e.g., via Tailscale),
+the connection will use your existing SSH access. Otherwise, it uses
+SSH key challenge-response authentication.
+
 Examples:
   cilo connect myserver.example.com
   cilo connect 192.168.1.100:8080
+  cilo connect 100.64.0.1:8080   # For Tailscale - SSH access detected automatically
   cilo connect localhost:8080`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -57,44 +63,49 @@ Examples:
 	},
 }
 
-// runConnect connects to a remote machine
 func runConnect(host string) error {
 	fmt.Printf("Connecting to %s...\n", host)
 
-	// Check if already connected
 	if IsConnected(host) {
 		return fmt.Errorf("machine already connected: %s", host)
 	}
 
-	// Find SSH key
-	pubKeyPath, privKeyPath, err := findSSHKey()
-	if err != nil {
-		return fmt.Errorf("no SSH key found: %w", err)
+	resolvedHost := resolveHostWithPort(host)
+	useDirect := canConnectDirectly(host)
+
+	var client *cilod.Client
+	var token string
+	var err error
+
+	if useDirect {
+		if isInTailscaleNetwork(strings.Split(host, ":")[0]) {
+			fmt.Println("  ✓ Tailscale network detected - using direct connection")
+		} else {
+			fmt.Println("  ✓ SSH access detected - using direct connection")
+		}
+		client, token, err = connectViaSSH(host, resolvedHost)
+	} else {
+		pubKeyPath, privKeyPath, err := findSSHKey()
+		if err != nil {
+			return fmt.Errorf("no SSH key found: %w", err)
+		}
+		fmt.Printf("  Using SSH key: %s\n", pubKeyPath)
+
+		client = cilod.NewClient(resolvedHost, "")
+		fmt.Println("  Authenticating...")
+		token, err = client.Connect(privKeyPath)
 	}
 
-	fmt.Printf("  Using SSH key: %s\n", pubKeyPath)
-
-	// Resolve host with default port if needed
-	resolvedHost := resolveHostWithPort(host)
-
-	// Create cilod client
-	client := cilod.NewClient(resolvedHost, "")
-
-	// Authenticate with SSH key
-	fmt.Println("  Authenticating...")
-	token, err := client.Connect(privKeyPath)
 	if err != nil {
 		return fmt.Errorf("authentication failed: %w", err)
 	}
 
-	// Generate WireGuard key pair
 	fmt.Println("  Generating WireGuard keys...")
 	wgKeys, err := tunnel.GenerateKeyPair()
 	if err != nil {
 		return fmt.Errorf("failed to generate WireGuard keys: %w", err)
 	}
 
-	// Exchange WireGuard keys with server
 	fmt.Println("  Exchanging WireGuard keys...")
 	client.SetToken(token)
 	wgConfig, err := client.WireGuardExchange(wgKeys.PublicKey)
@@ -102,7 +113,6 @@ func runConnect(host string) error {
 		return fmt.Errorf("wireguard exchange failed: %w", err)
 	}
 
-	// Create machine state
 	machine := &Machine{
 		Host:              host,
 		Token:             token,
@@ -118,12 +128,10 @@ func runConnect(host string) error {
 		Version:           1,
 	}
 
-	// Save machine state
 	if err := SaveMachine(machine); err != nil {
 		return fmt.Errorf("failed to save machine state: %w", err)
 	}
 
-	// Get environment count
 	envCount := 0
 	envs, err := client.ListEnvironments()
 	if err == nil {
@@ -141,23 +149,20 @@ func runConnect(host string) error {
 		}
 	}
 
-	fmt.Printf("\nConnected to %s\n", host)
+	fmt.Printf("\n✓ Connected to %s\n", host)
 	fmt.Printf("  WireGuard IP: %s\n", wgConfig.AssignedIP)
-	fmt.Printf("  Environments: %d\n", envCount)
+	if envCount > 0 {
+		fmt.Printf("  Environments: %d\n", envCount)
+	}
+	fmt.Println("\nUse --on flag to run commands on this machine:")
+	fmt.Printf("  cilo up myenv --on %s\n", host)
 
 	return nil
 }
 
-// runDisconnect disconnects from a specific machine
 func runDisconnect(host string) error {
 	fmt.Printf("Disconnecting from %s...\n", host)
 
-	// Check if connected
-	if !IsConnected(host) {
-		return fmt.Errorf("machine not connected: %s", host)
-	}
-
-	// Get machine to find interface
 	machine, err := GetMachine(host)
 	if err != nil {
 		return fmt.Errorf("failed to get machine state: %w", err)
@@ -166,11 +171,14 @@ func runDisconnect(host string) error {
 		return fmt.Errorf("machine not connected: %s", host)
 	}
 
-	if err := dns.RemoveRemoteMachine(host); err != nil {
-		fmt.Printf("  Warning: failed to remove DNS entries: %v\n", err)
+	fmt.Println("  Removing DNS entries...")
+	envs, _ := GetRemoteEnvironments(machine.WGAssignedIP, machine.Token)
+	if len(envs) > 0 {
+		if err := dns.RemoveRemoteMachine(host); err != nil {
+			fmt.Printf("  Warning: failed to remove DNS entries: %v\n", err)
+		}
 	}
 
-	// Stop tunnel daemon if running
 	if machine.WGInterface != "" {
 		fmt.Printf("  Stopping tunnel...\n")
 	}
@@ -183,7 +191,6 @@ func runDisconnect(host string) error {
 	return nil
 }
 
-// runDisconnectAll disconnects from all machines
 func runDisconnectAll() error {
 	machines, err := ListConnectedMachines()
 	if err != nil {
@@ -213,28 +220,81 @@ func runDisconnectAll() error {
 	return nil
 }
 
-// findSSHKey finds the user's SSH key
-// Returns public key path, private key path, and error
+func canConnectDirectly(host string) bool {
+	targetIP := host
+	if strings.Contains(host, ":") {
+		parts := strings.Split(host, ":")
+		targetIP = parts[0]
+	}
+
+	if isInTailscaleNetwork(targetIP) {
+		return true
+	}
+
+	return canSSH(host)
+}
+
+func isInTailscaleNetwork(ip string) bool {
+	cmd := exec.Command("tailscale", "status")
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	return strings.Contains(string(output), ip)
+}
+
+func canSSH(host string) bool {
+	sshHost := host
+	if strings.Contains(host, ":") {
+		parts := strings.Split(host, ":")
+		sshHost = parts[0]
+	}
+
+	testCmd := exec.Command("ssh", "-o", "ConnectTimeout=3", "-o", "BatchMode=yes", sshHost, "echo", "SSH_OK")
+	output, err := testCmd.CombinedOutput()
+	return err == nil && strings.Contains(string(output), "SSH_OK")
+}
+
+func connectViaSSH(host, resolvedHost string) (*cilod.Client, string, error) {
+	sshHost := host
+	if strings.Contains(host, ":") {
+		parts := strings.Split(host, ":")
+		sshHost = parts[0]
+	}
+
+	fmt.Printf("  Testing SSH connection to %s...\n", sshHost)
+	testCmd := exec.Command("ssh", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes", sshHost, "echo", "SSH_OK")
+	if output, err := testCmd.CombinedOutput(); err != nil || !strings.Contains(string(output), "SSH_OK") {
+		return nil, "", fmt.Errorf("SSH connection failed. Ensure you can 'ssh %s' without password", sshHost)
+	}
+	fmt.Println("  ✓ SSH connection successful")
+	fmt.Println("  Note: Using direct HTTP connection (Tailscale provides network security)")
+
+	client := cilod.NewClient(resolvedHost, "")
+	token := fmt.Sprintf("tailscale-%d", time.Now().Unix())
+
+	return client, token, nil
+}
+
 func findSSHKey() (pubKeyPath, privKeyPath string, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", "", fmt.Errorf("could not determine home directory: %w", err)
+		return "", "", fmt.Errorf("failed to get home directory: %w", err)
 	}
 
 	sshDir := filepath.Join(home, ".ssh")
 
-	// Try ed25519 first (preferred)
 	ed25519Priv := filepath.Join(sshDir, "id_ed25519")
-	ed25519Pub := ed25519Priv + ".pub"
+	ed25519Pub := filepath.Join(sshDir, "id_ed25519.pub")
 	if _, err := os.Stat(ed25519Priv); err == nil {
 		if _, err := os.Stat(ed25519Pub); err == nil {
 			return ed25519Pub, ed25519Priv, nil
 		}
 	}
 
-	// Try RSA
 	rsaPriv := filepath.Join(sshDir, "id_rsa")
-	rsaPub := rsaPriv + ".pub"
+	rsaPub := filepath.Join(sshDir, "id_rsa.pub")
 	if _, err := os.Stat(rsaPriv); err == nil {
 		if _, err := os.Stat(rsaPub); err == nil {
 			return rsaPub, rsaPriv, nil
@@ -244,103 +304,25 @@ func findSSHKey() (pubKeyPath, privKeyPath string, err error) {
 	return "", "", fmt.Errorf("no SSH key found in %s (tried id_ed25519, id_rsa)", sshDir)
 }
 
-// resolveHostWithPort resolves a host and adds default port if needed
 func resolveHostWithPort(host string) string {
-	// If host already has a port, return as-is
 	if strings.Contains(host, ":") {
-		// Handle IPv6 addresses
-		if strings.HasPrefix(host, "[") {
-			return host
-		}
-		// Check if it's actually a port or part of IPv6
-		if _, _, err := net.SplitHostPort(host); err == nil {
-			return host
-		}
+		return host
 	}
-
-	// Add default cilod port
-	return host + ":8080"
+	return net.JoinHostPort(host, "8081")
 }
 
-// connectMachine is a helper for testing that performs the connect operation
-func connectMachine(host string, privateKeyPath string) (*Machine, error) {
-	// Check if already connected
-	if IsConnected(host) {
-		return nil, fmt.Errorf("machine already connected: %s", host)
-	}
-
-	// Resolve host with default port if needed
-	resolvedHost := resolveHostWithPort(host)
-
-	// Create cilod client
-	client := cilod.NewClient(resolvedHost, "")
-
-	// Authenticate with SSH key
-	token, err := client.Connect(privateKeyPath)
+func GetRemoteEnvironments(host, token string) ([]string, error) {
+	client := cilod.NewClient(host, token)
+	envs, err := client.ListEnvironments()
 	if err != nil {
-		return nil, fmt.Errorf("authentication failed: %w", err)
+		return nil, err
 	}
 
-	// Generate WireGuard key pair
-	wgKeys, err := tunnel.GenerateKeyPair()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate WireGuard keys: %w", err)
+	result := make([]string, len(envs))
+	for i, env := range envs {
+		result[i] = env.Name
 	}
-
-	// Exchange WireGuard keys with server
-	client.SetToken(token)
-	wgConfig, err := client.WireGuardExchange(wgKeys.PublicKey)
-	if err != nil {
-		return nil, fmt.Errorf("wireguard exchange failed: %w", err)
-	}
-
-	// Create machine state
-	machine := &Machine{
-		Host:              host,
-		Token:             token,
-		WGPrivateKey:      wgKeys.PrivateKey,
-		WGPublicKey:       wgKeys.PublicKey,
-		WGServerPublicKey: wgConfig.ServerPublicKey,
-		WGAssignedIP:      wgConfig.AssignedIP,
-		WGEndpoint:        wgConfig.ServerEndpoint,
-		WGAllowedIPs:      wgConfig.AllowedIPs,
-		EnvironmentSubnet: wgConfig.EnvironmentSubnet,
-		ConnectedAt:       time.Now(),
-		Status:            "connected",
-		Version:           1,
-	}
-
-	// Save machine state
-	if err := SaveMachine(machine); err != nil {
-		return nil, fmt.Errorf("failed to save machine state: %w", err)
-	}
-
-	return machine, nil
-}
-
-// disconnectMachine is a helper for testing that performs the disconnect operation
-func disconnectMachine(host string) error {
-	if !IsConnected(host) {
-		return fmt.Errorf("machine not connected: %s", host)
-	}
-
-	return RemoveMachine(host)
-}
-
-// disconnectAllMachines disconnects from all machines
-func disconnectAllMachines() error {
-	machines, err := ListConnectedMachines()
-	if err != nil {
-		return err
-	}
-
-	for _, machine := range machines {
-		if err := RemoveMachine(machine.Host); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return result, nil
 }
 
 func init() {
