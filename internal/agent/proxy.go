@@ -6,6 +6,8 @@ package agent
 
 import (
 	"fmt"
+	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -18,6 +20,7 @@ type EnvProxy struct {
 	routes map[string]*url.URL
 	mu     sync.RWMutex
 	server *http.Server
+	ln     net.Listener
 }
 
 // NewEnvProxy creates a new reverse proxy listening on the given address
@@ -26,17 +29,21 @@ func NewEnvProxy(listenAddr string) (*EnvProxy, error) {
 		routes: make(map[string]*url.URL),
 	}
 
-	p.server = &http.Server{
-		Addr:    listenAddr,
-		Handler: http.HandlerFunc(p.handleRequest),
+	ln, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		return nil, fmt.Errorf("listen %s: %w", listenAddr, err)
 	}
+	p.ln = ln
+
+	p.server = &http.Server{Handler: http.HandlerFunc(p.handleRequest)}
 
 	go func() {
-		if err := p.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			// Log error but don't fail - proxy is optional
+		if err := p.server.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Printf("proxy serve error: %v", err)
 		}
 	}()
 
+	log.Printf("proxy listening on %s", listenAddr)
 	return p, nil
 }
 
@@ -82,6 +89,8 @@ func (p *EnvProxy) AddRoute(hostname, target string) error {
 	p.routes[hostname] = targetURL
 	p.mu.Unlock()
 
+	log.Printf("proxy route: %s -> %s", hostname, target)
+
 	return nil
 }
 
@@ -94,6 +103,7 @@ func (p *EnvProxy) RemoveRoutesForEnv(envName string) {
 	for host := range p.routes {
 		if strings.Contains(host, suffix) {
 			delete(p.routes, host)
+			log.Printf("proxy route removed: %s", host)
 		}
 	}
 }

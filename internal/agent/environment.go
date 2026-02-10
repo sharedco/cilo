@@ -117,10 +117,12 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 	// Register proxy routes for each service
 	if m.proxy != nil {
 		for name, ip := range services {
-			port := m.detectServicePort(workspacePath, name)
+			port := m.detectServiceHTTPPort(ctx, workspacePath, name)
 			hostname := fmt.Sprintf("%s.%s.test", name, req.EnvName)
 			target := fmt.Sprintf("http://%s:%s", ip, port)
-			m.proxy.AddRoute(hostname, target)
+			if err := m.proxy.AddRoute(hostname, target); err != nil {
+				log.Printf("Warning: failed to register proxy route for %s: %v", hostname, err)
+			}
 		}
 	}
 
@@ -434,11 +436,11 @@ func (m *EnvironmentManager) getContainerIP(ctx context.Context, containerName, 
 	return ip, nil
 }
 
-func (m *EnvironmentManager) detectServicePort(workspacePath, serviceName string) string {
+func (m *EnvironmentManager) detectServiceHTTPPort(ctx context.Context, workspacePath, serviceName string) string {
 	composePath := filepath.Join(workspacePath, "docker-compose.yml")
 	data, err := os.ReadFile(composePath)
 	if err != nil {
-		return "80"
+		return defaultHTTPPortForService(serviceName)
 	}
 
 	var root struct {
@@ -447,12 +449,12 @@ func (m *EnvironmentManager) detectServicePort(workspacePath, serviceName string
 		} `yaml:"services"`
 	}
 	if err := yaml.Unmarshal(data, &root); err != nil {
-		return "80"
+		return defaultHTTPPortForService(serviceName)
 	}
 
 	svc, ok := root.Services[serviceName]
 	if !ok || len(svc.Ports) == 0 {
-		return "80"
+		return defaultHTTPPortForService(serviceName)
 	}
 
 	portStr := fmt.Sprintf("%v", svc.Ports[0])
@@ -461,6 +463,17 @@ func (m *EnvironmentManager) detectServicePort(workspacePath, serviceName string
 		return strings.Split(parts[len(parts)-1], "/")[0]
 	}
 	return strings.Split(parts[0], "/")[0]
+}
+
+func defaultHTTPPortForService(serviceName string) string {
+	s := strings.ToLower(serviceName)
+	if s == "api" || strings.Contains(s, "backend") {
+		return "8080"
+	}
+	if s == "nginx" || s == "web" || strings.Contains(s, "front") {
+		return "80"
+	}
+	return "80"
 }
 
 // validateEnvName ensures environment name contains only safe characters

@@ -156,6 +156,8 @@ func startDNS() error {
 	configPath := filepath.Join(dnsDir, dnsConfFile)
 	pidPath := filepath.Join(dnsDir, dnsPidFile)
 
+	_ = stopDNSFromAllKnownPidFiles()
+
 	if data, err := os.ReadFile(pidPath); err == nil {
 		pid := strings.TrimSpace(string(data))
 		if _, err := os.Stat(fmt.Sprintf("/proc/%s", pid)); err == nil {
@@ -165,7 +167,11 @@ func startDNS() error {
 
 	cmd := exec.Command("dnsmasq", "--conf-file="+configPath, fmt.Sprintf("--pid-file=%s", pidPath))
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start dnsmasq: %w", err)
+		_ = stopDNSFromAllKnownPidFiles()
+		cmd2 := exec.Command("dnsmasq", "--conf-file="+configPath, fmt.Sprintf("--pid-file=%s", pidPath))
+		if err2 := cmd2.Start(); err2 != nil {
+			return fmt.Errorf("failed to start dnsmasq: %w", err)
+		}
 	}
 
 	return nil
@@ -208,21 +214,34 @@ func reloadDNSRestart() error {
 	dnsDir := getDNSDir()
 	pidPath := filepath.Join(dnsDir, dnsPidFile)
 
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		return startDNS()
-	}
+	_ = stopDNSFromAllKnownPidFiles()
 
-	pid := strings.TrimSpace(string(data))
-	pidInt := 0
-	fmt.Sscanf(pid, "%d", &pidInt)
-
-	if pidInt > 0 {
-		syscall.Kill(pidInt, syscall.SIGTERM)
-		exec.Command("sleep", "0.5").Run()
-	}
-
+	_ = os.Remove(pidPath)
 	return startDNS()
+}
+
+func stopDNSFromAllKnownPidFiles() error {
+	paths := []string{filepath.Join(getDNSDir(), dnsPidFile)}
+	if os.Geteuid() == 0 && os.Getenv("SUDO_USER") != "" {
+		paths = append(paths, "/var/root/.cilo/dns/"+dnsPidFile)
+	}
+
+	for _, pidPath := range paths {
+		data, err := os.ReadFile(pidPath)
+		if err != nil {
+			continue
+		}
+		pid := strings.TrimSpace(string(data))
+		pidInt := 0
+		fmt.Sscanf(pid, "%d", &pidInt)
+		if pidInt > 0 {
+			_ = syscall.Kill(pidInt, syscall.SIGTERM)
+			_ = exec.Command("sleep", "0.2").Run()
+		}
+		_ = os.Remove(pidPath)
+	}
+
+	return nil
 }
 
 func setupResolver(state *models.State) error {
