@@ -315,12 +315,12 @@ var upCmd = &cobra.Command{
 			return err
 		}
 
-		if err := dns.UpdateDNS(env); err != nil {
-			fmt.Printf("Warning: failed to update DNS: %v\n", err)
-		}
-
 		if err := state.UpdateEnvironment(env); err != nil {
 			return err
+		}
+
+		if err := dns.UpdateDNS(env); err != nil {
+			fmt.Printf("Warning: failed to update DNS: %v\n", err)
 		}
 
 		fmt.Printf("✓ Environment %s is running\n", name)

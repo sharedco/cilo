@@ -77,6 +77,10 @@ test-verbose:
 test-e2e: build
   export CILO_E2E_ENABLED=true && export CILO_BINARY=$(pwd)/cilo && go test -tags e2e ./test/e2e/...
 
+# Run E2E tests (local only, skip cloud auth tests)
+test-e2e-local: build
+  export CILO_E2E_ENABLED=true && export CILO_BINARY=$(pwd)/cilo && go test -tags e2e ./test/e2e/... -skip TestCloudLoginCommand
+
 # Run integration tests (shared services - quick)
 test-integration:
   ./test/integration/verify-shared-services.sh
