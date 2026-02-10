@@ -164,10 +164,8 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request)
 
 	var availableMachine *store.Machine
 	for _, m := range machines {
-		if m.AssignedEnv == nil || *m.AssignedEnv == "" {
-			availableMachine = m
-			break
-		}
+		availableMachine = m
+		break
 	}
 
 	if availableMachine == nil {
@@ -203,17 +201,9 @@ func (s *Server) handleCreateEnvironment(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := s.store.AssignMachine(ctx, availableMachine.ID, envID); err != nil {
-		_ = s.store.DeleteEnvironment(ctx, envID)
-		respondJSON(w, http.StatusInternalServerError, map[string]string{
-			"error": "Failed to assign machine: " + err.Error(),
-		})
-		return
-	}
-
-	if err := s.store.UpdateMachineStatus(ctx, availableMachine.ID, "provisioning"); err != nil {
-		fmt.Printf("Warning: failed to update machine status: %v\n", err)
-	}
+	// Machines are not exclusively assigned to a single environment.
+	// Keep machine status as-is (typically "ready") so multiple environments can
+	// run concurrently on the same machine.
 
 	// Provisioning is triggered by the sync-complete endpoint after the client
 	// finishes rsyncing the workspace. Starting it here would race with rsync.
@@ -363,12 +353,8 @@ func (s *Server) handleDestroyEnvironment(w http.ResponseWriter, r *http.Request
 			}
 		}
 
-		if err := s.store.AssignMachine(ctx, *env.MachineID, ""); err != nil {
-			fmt.Printf("Warning: failed to unassign machine: %v\n", err)
-		}
-		if err := s.store.UpdateMachineStatus(ctx, *env.MachineID, "ready"); err != nil {
-			fmt.Printf("Warning: failed to update machine status: %v\n", err)
-		}
+		// Do not mark the machine as exclusively assigned to a single environment.
+		// Multiple environments may be running on the same machine.
 	}
 
 	if err := s.store.DeleteEnvironment(ctx, envID); err != nil {
@@ -522,7 +508,17 @@ func (s *Server) handleRemoveMachine(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if machine.AssignedEnv != nil {
-		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "machine is assigned to environment"})
+		// assigned_env is not authoritative (machines can host multiple environments).
+		// Treat it as informational only.
+	}
+
+	count, err := s.store.CountEnvironmentsByMachineID(ctx, machineID)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to check machine environments"})
+		return
+	}
+	if count > 0 {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "machine has active environments"})
 		return
 	}
 

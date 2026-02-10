@@ -6,6 +6,7 @@ package dns
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -158,13 +159,6 @@ func startDNS() error {
 
 	_ = stopDNSFromAllKnownPidFiles()
 
-	if data, err := os.ReadFile(pidPath); err == nil {
-		pid := strings.TrimSpace(string(data))
-		if _, err := os.Stat(fmt.Sprintf("/proc/%s", pid)); err == nil {
-			return reloadDNSRestart()
-		}
-	}
-
 	cmd := exec.Command("dnsmasq", "--conf-file="+configPath, fmt.Sprintf("--pid-file=%s", pidPath))
 	if err := cmd.Start(); err != nil {
 		_ = stopDNSFromAllKnownPidFiles()
@@ -195,8 +189,7 @@ func reloadDNSGraceful() error {
 		return startDNS()
 	}
 
-	// Check if process exists
-	if _, err := os.Stat(fmt.Sprintf("/proc/%d", pidInt)); err != nil {
+	if !processExists(pidInt) {
 		return startDNS()
 	}
 
@@ -207,6 +200,17 @@ func reloadDNSGraceful() error {
 	}
 
 	return nil
+}
+
+func processExists(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	if err == nil {
+		return true
+	}
+	return errors.Is(err, syscall.EPERM)
 }
 
 // reloadDNSRestart stops and restarts dnsmasq (use reloadDNSGraceful for config updates)

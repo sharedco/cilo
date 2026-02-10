@@ -344,42 +344,42 @@ func TestExtractAgentAddress(t *testing.T) {
 		{
 			name:       "standard endpoint with port",
 			wgEndpoint: "10.225.0.100:51820",
-			expected:   "http://10.225.0.100:8080",
+			expected:   "http://10.225.0.100:8081",
 		},
 		{
 			name:       "different IP same port",
 			wgEndpoint: "192.168.1.50:51820",
-			expected:   "http://192.168.1.50:8080",
+			expected:   "http://192.168.1.50:8081",
 		},
 		{
 			name:       "public IP with port",
 			wgEndpoint: "203.0.113.45:51820",
-			expected:   "http://203.0.113.45:8080",
+			expected:   "http://203.0.113.45:8081",
 		},
 		{
 			name:       "endpoint without port",
 			wgEndpoint: "10.225.0.100",
-			expected:   "http://10.225.0.100:8080",
+			expected:   "http://10.225.0.100:8081",
 		},
 		{
 			name:       "IPv6 endpoint with port",
 			wgEndpoint: "[2001:db8::1]:51820",
-			expected:   "http://[2001:db8::1]:8080",
+			expected:   "http://[2001:db8::1]:8081",
 		},
 		{
 			name:       "empty endpoint",
 			wgEndpoint: "",
-			expected:   "http://:8080",
+			expected:   "",
 		},
 		{
 			name:       "endpoint with multiple colons (IPv6)",
 			wgEndpoint: "::1:51820",
-			expected:   "http://:8080", // Invalid format returns empty host
+			expected:   "http://:8081", // Invalid format returns empty host
 		},
 		{
 			name:       "different WireGuard port",
 			wgEndpoint: "10.0.0.1:99999",
-			expected:   "http://10.0.0.1:8080",
+			expected:   "http://10.0.0.1:8081",
 		},
 	}
 

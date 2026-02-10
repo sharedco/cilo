@@ -315,6 +315,16 @@ func (s *Store) DeleteMachine(ctx context.Context, id string) error {
 	return err
 }
 
+func (s *Store) CountEnvironmentsByMachineID(ctx context.Context, machineID string) (int, error) {
+	count := 0
+	err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(1)
+		FROM environments
+		WHERE machine_id = $1
+	`, machineID).Scan(&count)
+	return count, err
+}
+
 // CreateAPIKey creates a new API key
 func (s *Store) CreateAPIKey(ctx context.Context, key *APIKey) error {
 	_, err := s.pool.Exec(ctx, `

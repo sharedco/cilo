@@ -303,9 +303,9 @@ func (h *WireGuardHandler) notifyAgentRemovePeer(ctx context.Context, machineID,
 }
 
 // extractAgentAddress extracts the agent address from the WireGuard endpoint
-// WGEndpoint format: "10.225.0.100:51820" -> agent at "http://10.225.0.100:8080"
-// IPv6 format: "[2001:db8::1]:51820" -> agent at "http://[2001:db8::1]:8080"
-// Raw IP format: "10.225.0.100" -> agent at "http://10.225.0.100:8080"
+// WGEndpoint format: "10.225.0.100:51820" -> agent at "http://10.225.0.100:8081"
+// IPv6 format: "[2001:db8::1]:51820" -> agent at "http://[2001:db8::1]:8081"
+// Raw IP format: "10.225.0.100" -> agent at "http://10.225.0.100:8081"
 func extractAgentAddress(wgEndpoint string) string {
 	if wgEndpoint == "" {
 		return ""
