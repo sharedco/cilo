@@ -83,7 +83,8 @@ func runConnect(host string) error {
 		} else {
 			fmt.Println("  ✓ SSH access detected - using direct connection")
 		}
-		client, token, err = connectViaSSH(host, resolvedHost)
+		tailscaleDirect := isInTailscaleNetwork(strings.Split(host, ":")[0])
+		client, token, err = connectViaSSH(host, resolvedHost, tailscaleDirect)
 	} else {
 		pubKeyPath, privKeyPath, err := findSSHKey()
 		if err != nil {
@@ -172,11 +173,8 @@ func runDisconnect(host string) error {
 	}
 
 	fmt.Println("  Removing DNS entries...")
-	envs, _ := GetRemoteEnvironments(machine.WGAssignedIP, machine.Token)
-	if len(envs) > 0 {
-		if err := dns.RemoveRemoteMachine(host); err != nil {
-			fmt.Printf("  Warning: failed to remove DNS entries: %v\n", err)
-		}
+	if err := dns.RemoveRemoteMachine(host); err != nil {
+		fmt.Printf("  Warning: failed to remove DNS entries: %v\n", err)
 	}
 
 	if machine.WGInterface != "" {
@@ -256,7 +254,7 @@ func canSSH(host string) bool {
 	return err == nil && strings.Contains(string(output), "SSH_OK")
 }
 
-func connectViaSSH(host, resolvedHost string) (*cilod.Client, string, error) {
+func connectViaSSH(host, resolvedHost string, tailscaleDirect bool) (*cilod.Client, string, error) {
 	sshHost := host
 	if strings.Contains(host, ":") {
 		parts := strings.Split(host, ":")
@@ -269,10 +267,25 @@ func connectViaSSH(host, resolvedHost string) (*cilod.Client, string, error) {
 		return nil, "", fmt.Errorf("SSH connection failed. Ensure you can 'ssh %s' without password", sshHost)
 	}
 	fmt.Println("  ✓ SSH connection successful")
-	fmt.Println("  Note: Using direct HTTP connection (Tailscale provides network security)")
+	if tailscaleDirect {
+		fmt.Println("  Note: Using direct HTTP connection (Tailscale provides network security)")
+	}
 
 	client := cilod.NewClient(resolvedHost, "")
-	token := fmt.Sprintf("tailscale-%d", time.Now().Unix())
+	if tailscaleDirect {
+		token := fmt.Sprintf("tailscale-%d", time.Now().Unix())
+		return client, token, nil
+	}
+
+	// Non-tailscale direct mode: prove identity with SSH key auth so the agent can issue a real token.
+	_, privKeyPath, err := findSSHKey()
+	if err != nil {
+		return nil, "", fmt.Errorf("no SSH key found: %w", err)
+	}
+	token, err := client.Connect(privKeyPath)
+	if err != nil {
+		return nil, "", err
+	}
 
 	return client, token, nil
 }

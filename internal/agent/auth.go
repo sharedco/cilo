@@ -10,8 +10,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -21,7 +25,7 @@ import (
 // Implementations verify SSH signatures against public keys
 type SSHAuthVerifier interface {
 	// Verify checks if the signature is valid for the given public key and challenge
-	Verify(publicKey string, challenge string, signature string) error
+	Verify(publicKey string, challenge string, signature string, signatureFormat string) error
 	// GenerateChallenge creates a new random challenge for authentication
 	GenerateChallenge() (string, error)
 }
@@ -41,11 +45,18 @@ func (s *Session) IsExpired() bool {
 
 // AuthHandler handles SSH key authentication and session management
 type AuthHandler struct {
+	mu          sync.Mutex
 	verifier    SSHAuthVerifier
 	sessions    map[string]*Session
+	challenges  map[string]challengeRecord
 	tokenExpiry time.Duration
 	peersFile   string
 	peerSubnet  string
+}
+
+type challengeRecord struct {
+	PublicKey string
+	ExpiresAt time.Time
 }
 
 // NewAuthHandler creates a new authentication handler
@@ -53,10 +64,16 @@ func NewAuthHandler(verifier SSHAuthVerifier, peersFile string) *AuthHandler {
 	return &AuthHandler{
 		verifier:    verifier,
 		sessions:    make(map[string]*Session),
+		challenges:  make(map[string]challengeRecord),
 		tokenExpiry: 24 * time.Hour,
 		peersFile:   peersFile,
 		peerSubnet:  "10.225.0.0/24",
 	}
+}
+
+// ChallengeRequest requests a new authentication challenge.
+type ChallengeRequest struct {
+	PublicKey string `json:"public_key"`
 }
 
 // ConnectRequest is the request body for POST /auth/connect
@@ -65,6 +82,8 @@ type ConnectRequest struct {
 	PublicKey string `json:"public_key"` // SSH authorized_key format
 	Challenge string `json:"challenge"`  // Random nonce
 	Signature string `json:"signature"`  // Base64-encoded SSH signature
+	// SignatureFormat is the ssh.Signature.Format returned by the signer.
+	SignatureFormat string `json:"signature_format,omitempty"`
 }
 
 // ConnectResponse is returned after successful authentication
@@ -88,8 +107,21 @@ func (h *AuthHandler) HandleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate challenge was issued by this agent and is unexpired.
+	h.mu.Lock()
+	rec, ok := h.challenges[req.Challenge]
+	if ok {
+		delete(h.challenges, req.Challenge) // single-use
+	}
+	h.mu.Unlock()
+
+	if !ok || time.Now().After(rec.ExpiresAt) || rec.PublicKey != req.PublicKey {
+		respondJSON(w, http.StatusForbidden, map[string]string{"error": "invalid or expired challenge"})
+		return
+	}
+
 	// Verify the SSH signature
-	if err := h.verifier.Verify(req.PublicKey, req.Challenge, req.Signature); err != nil {
+	if err := h.verifier.Verify(req.PublicKey, req.Challenge, req.Signature, req.SignatureFormat); err != nil {
 		respondJSON(w, http.StatusForbidden, map[string]string{"error": "invalid signature"})
 		return
 	}
@@ -103,12 +135,42 @@ func (h *AuthHandler) HandleConnect(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: time.Now().Add(h.tokenExpiry),
 	}
 
+	h.mu.Lock()
 	h.sessions[token] = session
+	h.mu.Unlock()
 
 	respondJSON(w, http.StatusOK, ConnectResponse{
 		Token:     token,
 		ExpiresAt: session.ExpiresAt,
 	})
+}
+
+// HandleChallenge handles POST /auth/challenge.
+// Issues a short-lived, single-use challenge that must be signed by the client.
+func (h *AuthHandler) HandleChallenge(w http.ResponseWriter, r *http.Request) {
+	var req ChallengeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if req.PublicKey == "" {
+		respondJSON(w, http.StatusBadRequest, map[string]string{"error": "public_key is required"})
+		return
+	}
+
+	challenge, err := h.verifier.GenerateChallenge()
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to generate challenge"})
+		return
+	}
+
+	expiresAt := time.Now().Add(5 * time.Minute)
+
+	h.mu.Lock()
+	h.challenges[challenge] = challengeRecord{PublicKey: req.PublicKey, ExpiresAt: expiresAt}
+	h.mu.Unlock()
+
+	respondJSON(w, http.StatusOK, ChallengeResponse{Challenge: challenge, ExpiresAt: expiresAt})
 }
 
 // HandleDisconnect handles DELETE /auth/disconnect
@@ -120,7 +182,9 @@ func (h *AuthHandler) HandleDisconnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.mu.Lock()
 	delete(h.sessions, token)
+	h.mu.Unlock()
 	respondJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
 
@@ -133,7 +197,18 @@ func (h *AuthHandler) AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		if shouldTrustTailnet() && strings.HasPrefix(token, "tailscale-") && isTailnetRemote(r.RemoteAddr) {
+			// For direct connections over a Tailnet, we treat the network as the auth boundary.
+			// This enables seamless "cilo connect" when Tailscale is already providing access control.
+			session := &Session{Token: token, PublicKey: "tailscale", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(365 * 24 * time.Hour)}
+			ctx := context.WithValue(r.Context(), "session", session)
+			next.ServeHTTP(w, r.WithContext(ctx))
+			return
+		}
+
+		h.mu.Lock()
 		session, exists := h.sessions[token]
+		h.mu.Unlock()
 		if !exists || session.IsExpired() {
 			respondJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired token"})
 			return
@@ -193,7 +268,7 @@ func (v *DefaultSSHVerifier) AddAuthorizedKey(publicKey string) error {
 }
 
 // Verify implements SSH signature verification using golang.org/x/crypto/ssh
-func (v *DefaultSSHVerifier) Verify(publicKey string, challenge string, signature string) error {
+func (v *DefaultSSHVerifier) Verify(publicKey string, challenge string, signature string, signatureFormat string) error {
 	parsedKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(publicKey))
 	if err != nil {
 		return fmt.Errorf("failed to parse public key: %w", err)
@@ -205,12 +280,45 @@ func (v *DefaultSSHVerifier) Verify(publicKey string, challenge string, signatur
 	}
 
 	sigAlgo := parsedKey.Type()
+	if signatureFormat != "" {
+		sigAlgo = signatureFormat
+	}
 	sig := &ssh.Signature{
 		Format: sigAlgo,
 		Blob:   sigBytes,
 	}
 
 	return parsedKey.Verify([]byte(challenge), sig)
+}
+
+func shouldTrustTailnet() bool {
+	val := os.Getenv("CILO_AGENT_TRUST_TAILSCALE")
+	if val == "" {
+		return true
+	}
+	b, err := strconv.ParseBool(val)
+	if err != nil {
+		return true
+	}
+	return b
+}
+
+var tailscaleCGNAT = &net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+func isTailnetRemote(remoteAddr string) bool {
+	host := remoteAddr
+	if h, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	ip4 := ip.To4()
+	if ip4 == nil {
+		return false
+	}
+	return tailscaleCGNAT.Contains(ip4)
 }
 
 // GenerateChallenge creates a random challenge for authentication

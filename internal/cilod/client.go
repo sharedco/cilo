@@ -8,19 +8,18 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
 // Client is the cilod API client for CLI-to-cilod communication
@@ -69,67 +68,79 @@ func (c *Client) SetToken(token string) {
 // Connect authenticates with the cilod server using SSH key challenge-response
 // Returns a session token that must be used for subsequent requests
 func (c *Client) Connect(sshPrivateKeyPath string) (string, error) {
-	// Read the private key
-	privateKeyPEM, err := os.ReadFile(sshPrivateKeyPath)
-	if err != nil {
-		return "", fmt.Errorf("read private key: %w", err)
-	}
+	var signer ssh.Signer
+	var keyParseErr error
 
-	// Parse the private key
-	block, _ := pem.Decode(privateKeyPEM)
-	if block == nil {
-		return "", fmt.Errorf("failed to decode private key PEM")
-	}
-
-	privateKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-	if err != nil {
-		// Try PKCS8
-		key, err2 := x509.ParsePKCS8PrivateKey(block.Bytes)
-		if err2 != nil {
-			return "", fmt.Errorf("parse private key: %w", err)
-		}
-		var ok bool
-		privateKey, ok = key.(*rsa.PrivateKey)
-		if !ok {
-			return "", fmt.Errorf("private key is not RSA")
+	if sshPrivateKeyPath != "" {
+		privateKeyPEM, err := os.ReadFile(sshPrivateKeyPath)
+		if err != nil {
+			keyParseErr = fmt.Errorf("read private key: %w", err)
+		} else {
+			signer, err = ssh.ParsePrivateKey(privateKeyPEM)
+			if err != nil {
+				keyParseErr = fmt.Errorf("parse private key: %w", err)
+			}
 		}
 	}
 
-	// Generate SSH public key
-	publicKey, err := ssh.NewPublicKey(&privateKey.PublicKey)
-	if err != nil {
-		return "", fmt.Errorf("generate public key: %w", err)
+	if signer == nil {
+		sock := os.Getenv("SSH_AUTH_SOCK")
+		if sock == "" {
+			if keyParseErr != nil {
+				return "", keyParseErr
+			}
+			return "", fmt.Errorf("no SSH signer available (no key parsed and SSH_AUTH_SOCK is not set)")
+		}
+		conn, err := net.Dial("unix", sock)
+		if err != nil {
+			if keyParseErr != nil {
+				return "", fmt.Errorf("%v; also failed to connect to ssh-agent: %w", keyParseErr, err)
+			}
+			return "", fmt.Errorf("connect to ssh-agent: %w", err)
+		}
+		defer conn.Close()
+
+		ag := agent.NewClient(conn)
+		signers, err := ag.Signers()
+		if err != nil {
+			return "", fmt.Errorf("list ssh-agent signers: %w", err)
+		}
+		if len(signers) == 0 {
+			if keyParseErr != nil {
+				return "", fmt.Errorf("%v; also ssh-agent has no keys loaded", keyParseErr)
+			}
+			return "", fmt.Errorf("ssh-agent has no keys loaded")
+		}
+		signer = signers[0]
 	}
-	publicKeyStr := string(ssh.MarshalAuthorizedKey(publicKey))
-	publicKeyStr = strings.TrimSpace(publicKeyStr)
+
+	publicKeyStr := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey())))
 
 	// Step 1: Request challenge
 	challengeReq := AuthChallengeRequest{PublicKey: publicKeyStr}
 	challengeResp := &AuthChallengeResponse{}
-
 	if err := c.post(context.Background(), "/auth/challenge", challengeReq, challengeResp); err != nil {
 		return "", fmt.Errorf("request challenge: %w", err)
 	}
 
 	// Step 2: Sign the challenge
-	sig, err := rsa.SignPKCS1v15(rand.Reader, privateKey, 0, []byte(challengeResp.Challenge))
+	sig, err := signer.Sign(rand.Reader, []byte(challengeResp.Challenge))
 	if err != nil {
 		return "", fmt.Errorf("sign challenge: %w", err)
 	}
 
 	// Step 3: Send connect request with signature
 	connectReq := AuthConnectRequest{
-		Challenge: challengeResp.Challenge,
-		Signature: base64.StdEncoding.EncodeToString(sig),
-		PublicKey: publicKeyStr,
+		Challenge:       challengeResp.Challenge,
+		Signature:       base64.StdEncoding.EncodeToString(sig.Blob),
+		SignatureFormat: sig.Format,
+		PublicKey:       publicKeyStr,
 	}
 	connectResp := &AuthConnectResponse{}
-
 	if err := c.post(context.Background(), "/auth/connect", connectReq, connectResp); err != nil {
 		return "", fmt.Errorf("connect: %w", err)
 	}
 
-	// Store the token
 	c.token = connectResp.Token
 	return connectResp.Token, nil
 }

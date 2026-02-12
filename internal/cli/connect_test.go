@@ -18,8 +18,66 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sharedco/cilo/internal/cilod"
+	"github.com/sharedco/cilo/internal/cloud/tunnel"
 	"golang.org/x/crypto/ssh"
 )
+
+// connectMachine is a test helper that performs the same core steps as `cilo connect`
+// but allows injecting the SSH private key path directly (so tests don't depend on ~/.ssh).
+func connectMachine(host string, sshPrivateKeyPath string) (*Machine, error) {
+	if IsConnected(host) {
+		return nil, fmt.Errorf("machine already connected: %s", host)
+	}
+
+	resolvedHost := host
+	client := cilod.NewClient(resolvedHost, "")
+
+	token, err := client.Connect(sshPrivateKeyPath)
+	if err != nil {
+		return nil, err
+	}
+
+	wgKeys, err := tunnel.GenerateKeyPair()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate WireGuard keys: %w", err)
+	}
+
+	client.SetToken(token)
+	wgConfig, err := client.WireGuardExchange(wgKeys.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("wireguard exchange failed: %w", err)
+	}
+
+	machine := &Machine{
+		Host:              host,
+		Token:             token,
+		WGPrivateKey:      wgKeys.PrivateKey,
+		WGPublicKey:       wgKeys.PublicKey,
+		WGServerPublicKey: wgConfig.ServerPublicKey,
+		WGAssignedIP:      wgConfig.AssignedIP,
+		WGEndpoint:        wgConfig.ServerEndpoint,
+		WGAllowedIPs:      wgConfig.AllowedIPs,
+		EnvironmentSubnet: wgConfig.EnvironmentSubnet,
+		ConnectedAt:       time.Now(),
+		Status:            "connected",
+		Version:           1,
+	}
+
+	if err := SaveMachine(machine); err != nil {
+		return nil, err
+	}
+
+	return machine, nil
+}
+
+func disconnectMachine(host string) error {
+	return runDisconnect(host)
+}
+
+func disconnectAllMachines() error {
+	return runDisconnectAll()
+}
 
 // mockCilodServer creates a mock cilod server for testing
 func mockCilodServer(t *testing.T) (*httptest.Server, string) {
@@ -686,11 +744,11 @@ func TestResolveHostWithPort(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"localhost", "localhost:8080"},
+		{"localhost", "localhost:8081"},
 		{"localhost:9090", "localhost:9090"},
-		{"192.168.1.1", "192.168.1.1:8080"},
+		{"192.168.1.1", "192.168.1.1:8081"},
 		{"192.168.1.1:9090", "192.168.1.1:9090"},
-		{"host.example.com", "host.example.com:8080"},
+		{"host.example.com", "host.example.com:8081"},
 		{"host.example.com:443", "host.example.com:443"},
 	}
 

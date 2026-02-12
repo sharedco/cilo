@@ -29,7 +29,10 @@ type AuthChallengeResponse struct {
 type AuthConnectRequest struct {
 	Challenge string `json:"challenge"`
 	Signature string `json:"signature"`
-	PublicKey string `json:"public_key"`
+	// SignatureFormat is the ssh.Signature.Format returned by the signer.
+	// For RSA keys this may be "rsa-sha2-256"/"rsa-sha2-512" rather than "ssh-rsa".
+	SignatureFormat string `json:"signature_format,omitempty"`
+	PublicKey       string `json:"public_key"`
 }
 
 // AuthConnectResponse returns the session token after successful auth

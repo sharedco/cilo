@@ -7,6 +7,7 @@ package cilod
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -100,9 +101,7 @@ func (s *Streamer) StreamExec(ctx context.Context, env, service string, cmd []st
 
 	var wg sync.WaitGroup
 	exitCode := 0
-	var exitMu sync.Mutex
 	var streamErr error
-	var errMu sync.Mutex
 
 	// Goroutine to handle stdin -> WebSocket
 	if stdin != nil {
@@ -138,98 +137,95 @@ func (s *Streamer) StreamExec(ctx context.Context, env, service string, cmd []st
 		}
 	}()
 
-	// Main loop: handle WebSocket messages
-	connFailed := false
+	wsMsgCh := make(chan WebSocketMessage, 16)
+	wsErrCh := make(chan error, 1)
+
+	// Reader goroutine so we don't rely on read deadlines.
+	go func() {
+		defer close(wsMsgCh)
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				wsErrCh <- err
+				return
+			}
+			var wsMsg WebSocketMessage
+			if err := json.Unmarshal(msg, &wsMsg); err != nil {
+				continue
+			}
+			wsMsgCh <- wsMsg
+		}
+	}()
+
+	isBenignClose := func(err error) bool {
+		if err == nil {
+			return true
+		}
+		var ce *websocket.CloseError
+		if errors.As(err, &ce) {
+			return ce.Code == websocket.CloseNormalClosure || ce.Code == websocket.CloseGoingAway || ce.Code == websocket.CloseAbnormalClosure
+		}
+		return errors.Is(err, io.EOF) || strings.Contains(err.Error(), "unexpected EOF")
+	}
+
+	var readErr error
 	for {
 		select {
 		case <-ctx.Done():
-			// Send close message
-			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			_ = conn.Close()
+			cancel()
 			wg.Wait()
 			return ctx.Err()
-		default:
-		}
-
-		if connFailed {
-			break
-		}
-
-		conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-
-		// Recover from potential panics due to connection state
-		var msg []byte
-		var err error
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					err = fmt.Errorf("websocket panic: %v", r)
-				}
-			}()
-			_, msg, err = conn.ReadMessage()
-		}()
-
-		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-				break
-			}
-			if ctx.Err() != nil {
+		case err := <-wsErrCh:
+			// Don't return immediately: the reader goroutine may have already
+			// enqueued messages we still need to process (including exit).
+			readErr = err
+			wsErrCh = nil
+		case wsMsg, ok := <-wsMsgCh:
+			if !ok {
+				cancel()
 				wg.Wait()
-				return ctx.Err()
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if streamErr != nil {
+					return streamErr
+				}
+				if isBenignClose(readErr) {
+					return nil
+				}
+				if readErr != nil {
+					return fmt.Errorf("read WebSocket: %w", readErr)
+				}
+				return nil
 			}
-			if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
-				continue
-			}
-			// Check if this is a panic from closed connection - not a real error
-			if strings.Contains(err.Error(), "repeated read") {
-				connFailed = true
-				break
-			}
-			// Connection error - mark as failed and exit
-			errMu.Lock()
-			streamErr = fmt.Errorf("read WebSocket: %w", err)
-			errMu.Unlock()
-			connFailed = true
-			break
-		}
 
-		var wsMsg WebSocketMessage
-		if err := json.Unmarshal(msg, &wsMsg); err != nil {
-			continue
-		}
-
-		switch wsMsg.Type {
-		case "stdout":
-			if stdout != nil {
-				stdout.Write(wsMsg.Data)
+			switch wsMsg.Type {
+			case "stdout":
+				if stdout != nil {
+					_, _ = stdout.Write(wsMsg.Data)
+				}
+			case "stderr":
+				if stderr != nil {
+					_, _ = stderr.Write(wsMsg.Data)
+				}
+			case "exit":
+				exitCode = wsMsg.ExitCode
+				cancel()
+				wg.Wait()
+				if exitCode != 0 {
+					return fmt.Errorf("exit code %d", exitCode)
+				}
+				return nil
+			case "error":
+				streamErr = fmt.Errorf("remote error: %s", string(wsMsg.Data))
+				cancel()
+				wg.Wait()
+				return streamErr
 			}
-		case "stderr":
-			if stderr != nil {
-				stderr.Write(wsMsg.Data)
-			}
-		case "exit":
-			exitMu.Lock()
-			exitCode = wsMsg.ExitCode
-			exitMu.Unlock()
-			cancel()
-			wg.Wait()
-			if exitCode != 0 {
-				return fmt.Errorf("exit code %d", exitCode)
-			}
-			return nil
-		case "error":
-			errMu.Lock()
-			streamErr = fmt.Errorf("remote error: %s", string(wsMsg.Data))
-			errMu.Unlock()
-			cancel()
-			wg.Wait()
-			return streamErr
 		}
 	}
-
-	wg.Wait()
-	errMu.Lock()
-	defer errMu.Unlock()
-	return streamErr
 }
 
 // StreamLogs streams logs from a service via WebSocket
@@ -258,44 +254,80 @@ func (s *Streamer) StreamLogs(ctx context.Context, env, service string, follow b
 	}
 	defer conn.Close()
 
-	// Main loop: handle log messages
+	isBenignClose := func(err error) bool {
+		if err == nil {
+			return true
+		}
+		var ce *websocket.CloseError
+		if errors.As(err, &ce) {
+			return ce.Code == websocket.CloseNormalClosure || ce.Code == websocket.CloseGoingAway || ce.Code == websocket.CloseAbnormalClosure
+		}
+		// Some servers close without a close frame.
+		return errors.Is(err, io.EOF) || strings.Contains(err.Error(), "unexpected EOF")
+	}
+
+	msgCh := make(chan []byte, 16)
+	errCh := make(chan error, 1)
+
+	// Reader goroutine so we can honor ctx cancellation without using read deadlines.
+	go func() {
+		defer close(msgCh)
+		for {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
+				errCh <- err
+				return
+			}
+			msgCh <- msg
+		}
+	}()
+
+	var readErr error
+	eofSeen := false
 	for {
 		select {
 		case <-ctx.Done():
-			conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			_ = conn.Close()
 			return ctx.Err()
-		default:
-		}
-
-		conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+		case err := <-errCh:
+			// Don't return immediately: the reader goroutine may have already
+			// enqueued messages we still need to process.
+			readErr = err
+			errCh = nil
+		case msg, ok := <-msgCh:
+			if !ok {
+				if eofSeen {
+					return nil
+				}
+				if isBenignClose(readErr) {
+					return nil
+				}
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				if readErr != nil {
+					return fmt.Errorf("read WebSocket: %w", readErr)
+				}
 				return nil
 			}
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
+
+			var wsMsg WebSocketMessage
+			if err := json.Unmarshal(msg, &wsMsg); err != nil {
 				continue
 			}
-			return fmt.Errorf("read WebSocket: %w", err)
-		}
 
-		var wsMsg WebSocketMessage
-		if err := json.Unmarshal(msg, &wsMsg); err != nil {
-			continue
-		}
-
-		switch wsMsg.Type {
-		case "stdout", "stderr":
-			if stdout != nil {
-				stdout.Write(wsMsg.Data)
+			switch wsMsg.Type {
+			case "stdout", "stderr":
+				if stdout != nil {
+					_, _ = stdout.Write(wsMsg.Data)
+				}
+			case "eof":
+				eofSeen = true
+				return nil
+			case "error":
+				return fmt.Errorf("remote error: %s", string(wsMsg.Data))
 			}
-		case "eof":
-			return nil
-		case "error":
-			return fmt.Errorf("remote error: %s", string(wsMsg.Data))
 		}
 	}
 }

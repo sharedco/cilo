@@ -6,10 +6,8 @@ package agent
 
 import (
 	"bytes"
-	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha1"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -31,6 +29,11 @@ func TestSSHKeyAuth(t *testing.T) {
 		t.Fatalf("Failed to generate RSA key: %v", err)
 	}
 
+	signer, err := ssh.NewSignerFromKey(privateKey)
+	if err != nil {
+		t.Fatalf("Failed to create SSH signer: %v", err)
+	}
+
 	sshPublicKey, err := ssh.NewPublicKey(&privateKey.PublicKey)
 	if err != nil {
 		t.Fatalf("Failed to create SSH public key: %v", err)
@@ -39,35 +42,42 @@ func TestSSHKeyAuth(t *testing.T) {
 	publicKeyStr := string(ssh.MarshalAuthorizedKey(sshPublicKey))
 
 	// Create auth handler with stub verifier
-	authHandler := &AuthHandler{
-		verifier: &stubSSHVerifier{
-			authorizedKey: sshPublicKey,
-		},
-		sessions: make(map[string]*Session),
-	}
+	authHandler := NewAuthHandler(&stubSSHVerifier{authorizedKey: sshPublicKey}, "/tmp/peers.json")
 
 	// Setup router with auth middleware
 	r := chi.NewRouter()
+	r.Post("/auth/challenge", authHandler.HandleChallenge)
 	r.Post("/auth/connect", authHandler.HandleConnect)
 	r.With(authHandler.AuthMiddleware).Get("/protected", func(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
 	t.Run("valid SSH signature is accepted", func(t *testing.T) {
-		// Create a challenge
-		challenge := generateTestChallenge()
+		// Request challenge from server
+		chReqBody, _ := json.Marshal(ChallengeRequest{PublicKey: publicKeyStr})
+		chReq := httptest.NewRequest(http.MethodPost, "/auth/challenge", bytes.NewReader(chReqBody))
+		chReq.Header.Set("Content-Type", "application/json")
+		chRR := httptest.NewRecorder()
+		r.ServeHTTP(chRR, chReq)
+		if chRR.Code != http.StatusOK {
+			t.Fatalf("Expected challenge status 200, got %d: %s", chRR.Code, chRR.Body.String())
+		}
+		var chResp ChallengeResponse
+		if err := json.Unmarshal(chRR.Body.Bytes(), &chResp); err != nil {
+			t.Fatalf("Failed to parse challenge response: %v", err)
+		}
 
-		// Sign the challenge with our private key
-		signature, err := signChallenge(privateKey, challenge)
+		sig, err := signer.Sign(rand.Reader, []byte(chResp.Challenge))
 		if err != nil {
 			t.Fatalf("Failed to sign challenge: %v", err)
 		}
 
 		// Build connect request
 		reqBody := ConnectRequest{
-			PublicKey: publicKeyStr,
-			Challenge: challenge,
-			Signature: signature,
+			PublicKey:       publicKeyStr,
+			Challenge:       chResp.Challenge,
+			Signature:       base64.StdEncoding.EncodeToString(sig.Blob),
+			SignatureFormat: sig.Format,
 		}
 
 		body, _ := json.Marshal(reqBody)
@@ -112,17 +122,30 @@ func TestSSHKeyAuth(t *testing.T) {
 	})
 
 	t.Run("invalid signature is rejected with 403", func(t *testing.T) {
-		// Create a challenge
-		challenge := generateTestChallenge()
+		// Request challenge from server
+		chReqBody, _ := json.Marshal(ChallengeRequest{PublicKey: publicKeyStr})
+		chReq := httptest.NewRequest(http.MethodPost, "/auth/challenge", bytes.NewReader(chReqBody))
+		chReq.Header.Set("Content-Type", "application/json")
+		chRR := httptest.NewRecorder()
+		r.ServeHTTP(chRR, chReq)
+		if chRR.Code != http.StatusOK {
+			t.Fatalf("Expected challenge status 200, got %d: %s", chRR.Code, chRR.Body.String())
+		}
+		var chResp ChallengeResponse
+		if err := json.Unmarshal(chRR.Body.Bytes(), &chResp); err != nil {
+			t.Fatalf("Failed to parse challenge response: %v", err)
+		}
 
 		// Generate a different key to create invalid signature
 		wrongKey, _ := rsa.GenerateKey(rand.Reader, 2048)
-		wrongSignature, _ := signChallenge(wrongKey, challenge)
+		wrongSigner, _ := ssh.NewSignerFromKey(wrongKey)
+		wrongSig, _ := wrongSigner.Sign(rand.Reader, []byte(chResp.Challenge))
 
 		reqBody := ConnectRequest{
-			PublicKey: publicKeyStr,
-			Challenge: challenge,
-			Signature: wrongSignature,
+			PublicKey:       publicKeyStr,
+			Challenge:       chResp.Challenge,
+			Signature:       base64.StdEncoding.EncodeToString(wrongSig.Blob),
+			SignatureFormat: wrongSig.Format,
 		}
 
 		body, _ := json.Marshal(reqBody)
@@ -146,11 +169,13 @@ func TestSSHKeyAuth(t *testing.T) {
 	t.Run("expired token is rejected", func(t *testing.T) {
 		// Create an expired token manually
 		expiredToken := "expired_test_token"
+		authHandler.mu.Lock()
 		authHandler.sessions[expiredToken] = &Session{
 			Token:     expiredToken,
 			PublicKey: publicKeyStr,
 			ExpiresAt: time.Now().Add(-time.Hour), // Expired 1 hour ago
 		}
+		authHandler.mu.Unlock()
 
 		req := httptest.NewRequest(http.MethodGet, "/protected", nil)
 		req.Header.Set("Authorization", "Bearer "+expiredToken)
@@ -171,17 +196,6 @@ func generateTestChallenge() string {
 	return base64.StdEncoding.EncodeToString(b)
 }
 
-// signChallenge signs a challenge with an RSA private key
-// Uses SHA1 to match the "ssh-rsa" algorithm expected by the SSH package
-func signChallenge(privateKey *rsa.PrivateKey, challenge string) (string, error) {
-	hash := sha1.Sum([]byte(challenge))
-	signature, err := rsa.SignPKCS1v15(rand.Reader, privateKey, crypto.SHA1, hash[:])
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(signature), nil
-}
-
 // stubSSHVerifier is a stub implementation for testing
 // In RED state, this returns hardcoded values
 // In GREEN state, this will perform actual SSH signature verification
@@ -189,7 +203,7 @@ type stubSSHVerifier struct {
 	authorizedKey ssh.PublicKey
 }
 
-func (s *stubSSHVerifier) Verify(publicKey string, challenge string, signature string) error {
+func (s *stubSSHVerifier) Verify(publicKey string, challenge string, signature string, signatureFormat string) error {
 	parsedKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(publicKey))
 	if err != nil {
 		return fmt.Errorf("failed to parse public key: %w", err)
@@ -201,6 +215,9 @@ func (s *stubSSHVerifier) Verify(publicKey string, challenge string, signature s
 	}
 
 	sigAlgo := parsedKey.Type()
+	if signatureFormat != "" {
+		sigAlgo = signatureFormat
+	}
 	sig := &ssh.Signature{
 		Format: sigAlgo,
 		Blob:   sigBytes,

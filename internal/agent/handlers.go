@@ -30,6 +30,11 @@ func (s *Server) HandleAuthConnect(w http.ResponseWriter, r *http.Request) {
 	s.authHandler.HandleConnect(w, r)
 }
 
+// HandleAuthChallenge handles POST /auth/challenge
+func (s *Server) HandleAuthChallenge(w http.ResponseWriter, r *http.Request) {
+	s.authHandler.HandleChallenge(w, r)
+}
+
 // HandleAuthDisconnect handles DELETE /auth/disconnect
 func (s *Server) HandleAuthDisconnect(w http.ResponseWriter, r *http.Request) {
 	s.authHandler.HandleDisconnect(w, r)
@@ -266,9 +271,9 @@ func (s *Server) HandleWireGuardExchange(w http.ResponseWriter, r *http.Request)
 
 	respondJSON(w, http.StatusOK, WireGuardExchangeResponse{
 		ServerPublicKey: serverPublicKey,
-		ServerEndpoint:    serverEndpoint,
-		AssignedIP:        assignedIP,
-		AllowedIPs:        []string{"10.225.0.0/16"},
+		ServerEndpoint:  serverEndpoint,
+		AssignedIP:      assignedIP,
+		AllowedIPs:      []string{"10.225.0.0/16"},
 	})
 }
 

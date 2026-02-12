@@ -98,6 +98,7 @@ func (s *Server) setupMiddleware() {
 func (s *Server) setupRoutes() {
 	s.router.Get("/health", s.handleHealth)
 
+	s.router.Post("/auth/challenge", s.HandleAuthChallenge)
 	s.router.Post("/auth/connect", s.HandleAuthConnect)
 	s.router.With(s.authHandler.AuthMiddleware).Delete("/auth/disconnect", s.HandleAuthDisconnect)
 
