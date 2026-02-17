@@ -154,7 +154,6 @@ func (c *Client) ListEnvironments() ([]Environment, error) {
 	return resp.Environments, nil
 }
 
-// UpEnvironment creates or starts an environment
 func (c *Client) UpEnvironment(name string, opts UpOptions) error {
 	req := EnvironmentUpRequest{
 		WorkspacePath: opts.WorkspacePath,
@@ -164,6 +163,20 @@ func (c *Client) UpEnvironment(name string, opts UpOptions) error {
 	path := fmt.Sprintf("/environments/%s/up", name)
 	var resp EnvironmentUpResponse
 	return c.post(context.Background(), path, req, &resp)
+}
+
+func (c *Client) UpEnvironmentWithResponse(name string, opts UpOptions) (*EnvironmentUpResponse, error) {
+	req := EnvironmentUpRequest{
+		WorkspacePath: opts.WorkspacePath,
+		Build:         opts.Build,
+		Recreate:      opts.Recreate,
+	}
+	path := fmt.Sprintf("/environments/%s/up", name)
+	var resp EnvironmentUpResponse
+	if err := c.post(context.Background(), path, req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
 }
 
 // DownEnvironment stops an environment
