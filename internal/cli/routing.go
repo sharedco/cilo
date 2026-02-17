@@ -72,7 +72,19 @@ func resolveTarget(cmd *cobra.Command) (Target, error) {
 	}
 
 	if onFlag == "" {
-		return LocalTarget{}, nil
+		machines, err := ListConnectedMachines()
+		if err != nil || len(machines) == 0 {
+			return LocalTarget{}, nil
+		}
+		connected := filterConnected(machines)
+		switch len(connected) {
+		case 0:
+			return LocalTarget{}, nil
+		case 1:
+			onFlag = connected[0].Host
+		default:
+			return nil, fmt.Errorf("multiple machines connected. Use --on to specify:\n%s", formatMachineList(connected))
+		}
 	}
 
 	machine, err := GetMachine(onFlag)
@@ -83,9 +95,6 @@ func resolveTarget(cmd *cobra.Command) (Target, error) {
 		return nil, fmt.Errorf("machine '%s' is not connected. Run 'cilo connect %s' first", onFlag, onFlag)
 	}
 
-	// For HTTP API calls, use the original Tailscale/SSH host (not WireGuard IP).
-	// WireGuard tunnel is for data traffic; control API uses the direct network path.
-	// The token saved is a tailscale-* token which the agent accepts when requests come from Tailnet.
 	apiHost := onFlag
 	client := cilod.NewClient(apiHost, machine.Token)
 
@@ -93,6 +102,24 @@ func resolveTarget(cmd *cobra.Command) (Target, error) {
 		Machine: onFlag,
 		Client:  client,
 	}, nil
+}
+
+func filterConnected(machines []Machine) []Machine {
+	var result []Machine
+	for _, m := range machines {
+		if m.Status == "connected" {
+			result = append(result, m)
+		}
+	}
+	return result
+}
+
+func formatMachineList(machines []Machine) string {
+	var lines []string
+	for _, m := range machines {
+		lines = append(lines, fmt.Sprintf("  cilo <command> --on %s", m.Host))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // getMachinesDir returns the directory where machine state is stored
