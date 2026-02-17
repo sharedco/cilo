@@ -151,6 +151,7 @@ type WireGuardExchangeRequest struct {
 type WireGuardExchangeResponse struct {
 	ServerPublicKey   string   `json:"server_public_key"` // cilod's WG public key
 	ServerEndpoint    string   `json:"server_endpoint"`   // cilod's WG endpoint (IP:port)
+	ServerAddress     string   `json:"server_address"`    // cilod's WG tunnel IP (for proxy/DNS)
 	AssignedIP        string   `json:"assigned_ip"`       // IP assigned to client in WG subnet
 	AllowedIPs        []string `json:"allowed_ips"`       // Routes through tunnel
 	EnvironmentSubnet string   `json:"environment_subnet,omitempty"`
@@ -160,6 +161,7 @@ type WireGuardExchangeResponse struct {
 type WGConfig struct {
 	ServerPublicKey   string
 	ServerEndpoint    string
+	ServerAddress     string
 	AssignedIP        string
 	AllowedIPs        []string
 	EnvironmentSubnet string

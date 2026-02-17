@@ -240,6 +240,7 @@ func (c *Client) WireGuardExchange(publicKey string) (*WGConfig, error) {
 	return &WGConfig{
 		ServerPublicKey:   resp.ServerPublicKey,
 		ServerEndpoint:    resp.ServerEndpoint,
+		ServerAddress:     resp.ServerAddress,
 		AssignedIP:        resp.AssignedIP,
 		AllowedIPs:        resp.AllowedIPs,
 		EnvironmentSubnet: resp.EnvironmentSubnet,

@@ -127,6 +127,7 @@ func runConnect(host string) error {
 		WGPublicKey:       wgKeys.PublicKey,
 		WGServerPublicKey: wgConfig.ServerPublicKey,
 		WGAssignedIP:      wgConfig.AssignedIP,
+		WGServerAddress:   wgConfig.ServerAddress,
 		WGEndpoint:        wgConfig.ServerEndpoint,
 		WGAllowedIPs:      wgConfig.AllowedIPs,
 		WGInterface:       defaultTunnelInterface(),
@@ -158,9 +159,13 @@ func runConnect(host string) error {
 
 	if envCount > 0 {
 		fmt.Println("  Setting up DNS entries...")
+		dnsIP := wgConfig.ServerAddress
+		if dnsIP == "" {
+			dnsIP = wgConfig.AssignedIP
+		}
 		remoteMachine := &dns.RemoteMachine{
 			Host:         host,
-			WGAssignedIP: wgConfig.AssignedIP,
+			WGAssignedIP: dnsIP,
 		}
 		if err := dns.AddRemoteMachine(remoteMachine, envs); err != nil {
 			fmt.Printf("  Warning: failed to add DNS entries: %v\n", err)

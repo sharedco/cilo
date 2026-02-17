@@ -273,9 +273,12 @@ func (s *Server) HandleWireGuardExchange(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	serverAddress := strings.SplitN(s.config.WGAddress, "/", 2)[0]
+
 	respondJSON(w, http.StatusOK, WireGuardExchangeResponse{
 		ServerPublicKey: serverPublicKey,
 		ServerEndpoint:  serverEndpoint,
+		ServerAddress:   serverAddress,
 		AssignedIP:      assignedIP,
 		AllowedIPs:      []string{"10.225.0.0/16"},
 	})

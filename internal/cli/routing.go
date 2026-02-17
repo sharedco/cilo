@@ -51,6 +51,7 @@ type Machine struct {
 	WGPublicKey       string    `json:"wg_public_key"`
 	WGServerPublicKey string    `json:"wg_server_public_key"`
 	WGAssignedIP      string    `json:"wg_assigned_ip"`
+	WGServerAddress   string    `json:"wg_server_address,omitempty"`
 	WGEndpoint        string    `json:"wg_endpoint"`
 	WGAllowedIPs      []string  `json:"wg_allowed_ips,omitempty"`
 	WGInterface       string    `json:"wg_interface,omitempty"`
