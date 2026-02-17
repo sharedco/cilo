@@ -80,6 +80,7 @@ CILO_WORKSPACE_DIR=/var/cilo/envs
 CILO_WG_INTERFACE=wg0
 CILO_WG_PORT=51820
 CILO_WG_ADDRESS=10.225.0.100/16
+CILO_WG_ENDPOINT=${TAILSCALE_IP}:51820
 EOF
 
 # Save WireGuard keys separately if generated
@@ -179,6 +180,7 @@ sudo -E bash -c '
   export CILO_WG_INTERFACE="wg0"
   export CILO_WG_PORT="51820"
   export CILO_WG_ADDRESS="10.225.0.100/16"
+  export CILO_WG_ENDPOINT="${TAILSCALE_IP}:51820"
   export CILO_SERVER_URL="http://localhost:8080"
   export CILO_MACHINE_ID="'"$MACHINE_NAME"'"
   

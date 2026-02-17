@@ -6,8 +6,11 @@ package agent
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -264,9 +267,10 @@ func (s *Server) HandleWireGuardExchange(w http.ResponseWriter, r *http.Request)
 	}
 
 	serverPublicKey := s.wgManager.GetPublicKey()
-	serverEndpoint := s.config.WGAddress
-	if idx := strings.Index(serverEndpoint, "/"); idx != -1 {
-		serverEndpoint = serverEndpoint[:idx] + ":" + "51820"
+	serverEndpoint, err := resolveWGEndpoint(r, s.config.WGEndpoint, s.config.ListenAddr, s.config.WGListenPort)
+	if err != nil {
+		respondJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
 
 	respondJSON(w, http.StatusOK, WireGuardExchangeResponse{
@@ -275,6 +279,52 @@ func (s *Server) HandleWireGuardExchange(w http.ResponseWriter, r *http.Request)
 		AssignedIP:      assignedIP,
 		AllowedIPs:      []string{"10.225.0.0/16"},
 	})
+}
+
+func resolveWGEndpoint(r *http.Request, configuredEndpoint, listenAddr string, listenPort int) (string, error) {
+	if configuredEndpoint != "" {
+		return configuredEndpoint, nil
+	}
+
+	host := hostFromRequest(r)
+	if host == "" {
+		if addrHost := hostFromAddr(listenAddr); addrHost != "" {
+			host = addrHost
+		}
+	}
+
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		return "", fmt.Errorf("wireguard endpoint not configured (set CILO_WG_ENDPOINT)")
+	}
+
+	return net.JoinHostPort(host, strconv.Itoa(listenPort)), nil
+}
+
+func hostFromRequest(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	if r.Host == "" {
+		return ""
+	}
+
+	if host, _, err := net.SplitHostPort(r.Host); err == nil {
+		return host
+	}
+
+	return r.Host
+}
+
+func hostFromAddr(addr string) string {
+	if addr == "" {
+		return ""
+	}
+
+	if host, _, err := net.SplitHostPort(addr); err == nil {
+		return host
+	}
+
+	return addr
 }
 
 // HandleWireGuardRemovePeer handles DELETE /wireguard/peers/:key

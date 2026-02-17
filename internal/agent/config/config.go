@@ -25,6 +25,7 @@ type Config struct {
 	WGListenPort int    // WireGuard listen port
 	WGPrivateKey string // WireGuard private key
 	WGAddress    string // WireGuard interface address (CIDR)
+	WGEndpoint   string
 
 	// Server connection (for reporting)
 	ServerURL string
@@ -42,6 +43,7 @@ func Load() *Config {
 		WGListenPort: getInt("CILO_WG_PORT", 51820),
 		WGPrivateKey: getEnv("CILO_WG_PRIVATE_KEY", ""),
 		WGAddress:    getEnv("CILO_WG_ADDRESS", "10.225.0.100/16"),
+		WGEndpoint:   getEnv("CILO_WG_ENDPOINT", ""),
 		ServerURL:    getEnv("CILO_SERVER_URL", ""),
 		MachineID:    getEnv("CILO_MACHINE_ID", ""),
 	}

@@ -115,11 +115,9 @@ func (s *Server) setupRoutes() {
 			env.Post("/exec", s.HandleEnvironmentExec)
 		})
 
-		r.Route("/wireguard", func(wg chi.Router) {
-			wg.Post("/exchange", s.HandleWireGuardExchange)
-			wg.Delete("/peers/{key}", s.HandleWireGuardRemovePeer)
-			wg.Get("/status", s.HandleWireGuardStatus)
-		})
+		r.Post("/wireguard/exchange", s.HandleWireGuardExchange)
+		r.Delete("/wireguard/peers/{key}", s.HandleWireGuardRemovePeer)
+		r.Get("/wireguard/status", s.HandleWireGuardStatus)
 
 		r.Post("/sync/{name}", s.HandleWorkspaceSync)
 	})
@@ -131,11 +129,6 @@ func (s *Server) setupRoutes() {
 		r.Get("/logs/{service}", s.handleLogs)
 	})
 
-	s.router.Route("/wireguard", func(r chi.Router) {
-		r.Post("/add-peer", s.handleAddPeer)
-		r.Delete("/remove-peer/{key}", s.handleRemovePeer)
-		r.Get("/status", s.handleWGStatus)
-	})
 }
 
 // Start begins listening for HTTP requests

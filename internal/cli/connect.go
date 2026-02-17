@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -123,6 +124,7 @@ func runConnect(host string) error {
 		WGAssignedIP:      wgConfig.AssignedIP,
 		WGEndpoint:        wgConfig.ServerEndpoint,
 		WGAllowedIPs:      wgConfig.AllowedIPs,
+		WGInterface:       defaultTunnelInterface(),
 		EnvironmentSubnet: wgConfig.EnvironmentSubnet,
 		ConnectedAt:       time.Now(),
 		Status:            "connected",
@@ -131,6 +133,10 @@ func runConnect(host string) error {
 
 	if err := SaveMachine(machine); err != nil {
 		return fmt.Errorf("failed to save machine state: %w", err)
+	}
+
+	if err := ensureTunnelForMachine(machine); err != nil {
+		return fmt.Errorf("failed to start WireGuard tunnel: %w", err)
 	}
 
 	envCount := 0
@@ -179,6 +185,9 @@ func runDisconnect(host string) error {
 
 	if machine.WGInterface != "" {
 		fmt.Printf("  Stopping tunnel...\n")
+	}
+	if err := stopTunnelForMachine(host); err != nil {
+		fmt.Printf("  Warning: failed to stop tunnel: %v\n", err)
 	}
 
 	if err := RemoveMachine(host); err != nil {
@@ -336,6 +345,71 @@ func GetRemoteEnvironments(host, token string) ([]string, error) {
 		result[i] = env.Name
 	}
 	return result, nil
+}
+
+func ensureTunnelForMachine(machine *Machine) error {
+	if machine == nil {
+		return fmt.Errorf("machine not configured")
+	}
+	if machine.WGEndpoint == "" {
+		return fmt.Errorf("wireguard endpoint not configured for %s", machine.Host)
+	}
+
+	state, err := tunnel.GetDaemonStatus()
+	if err == nil && state.Running {
+		if state.EnvironmentID == machine.Host {
+			return nil
+		}
+		if state.EnvironmentID != "" {
+			return fmt.Errorf("tunnel already running for %s (run 'cilo tunnel stop' to switch)", state.EnvironmentID)
+		}
+		return fmt.Errorf("tunnel already running (run 'cilo tunnel stop' to switch)")
+	}
+
+	cfg := &tunnel.DaemonConfig{
+		Interface:      machine.WGInterface,
+		PrivateKey:     machine.WGPrivateKey,
+		Address:        normalizeAssignedIP(machine.WGAssignedIP),
+		ListenPort:     0,
+		ServerPubKey:   machine.WGServerPublicKey,
+		ServerEndpoint: machine.WGEndpoint,
+		AllowedIPs:     machine.WGAllowedIPs,
+		EnvironmentID:  machine.Host,
+	}
+
+	if err := StartTunnelDaemon(cfg); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func stopTunnelForMachine(host string) error {
+	state, err := tunnel.GetDaemonStatus()
+	if err != nil {
+		return err
+	}
+	if !state.Running {
+		return nil
+	}
+	if state.EnvironmentID != "" && state.EnvironmentID != host {
+		return nil
+	}
+	return tunnel.StopDaemon()
+}
+
+func defaultTunnelInterface() string {
+	if runtime.GOOS == "darwin" {
+		return "utun"
+	}
+	return "cilo0"
+}
+
+func normalizeAssignedIP(assigned string) string {
+	if strings.Contains(assigned, "/") {
+		return assigned
+	}
+	return assigned + "/32"
 }
 
 func init() {
