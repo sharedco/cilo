@@ -6,14 +6,12 @@ package dns
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
-	"syscall"
-	"time"
 
 	"github.com/sharedco/cilo/internal/config"
 	"github.com/sharedco/cilo/internal/models"
@@ -22,14 +20,56 @@ import (
 const (
 	defaultDNSPort = 5354
 	dnsConfFile    = "dnsmasq.conf"
-	dnsPidFile     = "dnsmasq.pid"
 	resolverDir    = "/etc/resolver"
 )
 
 func SetupDNS(state *models.State) error {
+	if runtime.GOOS == "darwin" {
+		if err := ensureDnsmasqBaseConfig(); err != nil {
+			return err
+		}
+
+		entries, err := RenderEntries(state)
+		if err != nil {
+			return fmt.Errorf("failed to render DNS entries: %w", err)
+		}
+
+		ciloConf := getCiloConfPath()
+		if err := os.WriteFile(ciloConf, []byte(entries), 0644); err != nil {
+			return fmt.Errorf("failed to write cilo DNS config: %w", err)
+		}
+
+		return reloadDNSService()
+	}
+
+	if runtime.GOOS == "linux" {
+		if _, err := os.Stat("/etc/systemd"); err == nil {
+			return setupSystemdResolved(state)
+		}
+
+		if isDnsmasqManaged() {
+			entries, err := RenderEntries(state)
+			if err != nil {
+				return fmt.Errorf("failed to render DNS entries: %w", err)
+			}
+
+			ciloConf := getCiloConfPath()
+			if err := os.WriteFile(ciloConf, []byte(entries), 0644); err != nil {
+				return fmt.Errorf("failed to write cilo DNS config: %w", err)
+			}
+
+			return reloadDNSService()
+		}
+
+		return fallbackSetupDNS(state)
+	}
+
+	return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+}
+
+func fallbackSetupDNS(state *models.State) error {
 	dnsDir := getDNSDir()
 
-	// Render base config with current state
 	config, err := RenderConfig(state)
 	if err != nil {
 		return fmt.Errorf("failed to render base DNS config: %w", err)
@@ -40,21 +80,73 @@ func SetupDNS(state *models.State) error {
 		return fmt.Errorf("failed to write dnsmasq config: %w", err)
 	}
 
-	return startDNS()
+	return fallbackStartDNS()
 }
 
 func SetupSystemResolver(state *models.State) error {
 	return setupResolver(state)
 }
 
-// UpdateDNSFromState regenerates DNS config from state and reloads dnsmasq
 func UpdateDNSFromState(state *models.State) error {
+	if runtime.GOOS == "darwin" {
+		entries, err := RenderEntries(state)
+		if err != nil {
+			return fmt.Errorf("failed to render DNS entries: %w", err)
+		}
+
+		ciloConf := getCiloConfPath()
+		tmpPath := ciloConf + ".tmp"
+
+		if err := os.WriteFile(tmpPath, []byte(entries), 0644); err != nil {
+			return fmt.Errorf("failed to write temp DNS config: %w", err)
+		}
+
+		if err := os.Rename(tmpPath, ciloConf); err != nil {
+			os.Remove(tmpPath)
+			return fmt.Errorf("failed to rename DNS config: %w", err)
+		}
+
+		return reloadDNSService()
+	}
+
+	if runtime.GOOS == "linux" {
+		if _, err := os.Stat("/etc/systemd"); err == nil {
+			return setupSystemdResolved(state)
+		}
+
+		if isDnsmasqManaged() {
+			entries, err := RenderEntries(state)
+			if err != nil {
+				return fmt.Errorf("failed to render DNS entries: %w", err)
+			}
+
+			ciloConf := getCiloConfPath()
+			tmpPath := ciloConf + ".tmp"
+
+			if err := os.WriteFile(tmpPath, []byte(entries), 0644); err != nil {
+				return fmt.Errorf("failed to write temp DNS config: %w", err)
+			}
+
+			if err := os.Rename(tmpPath, ciloConf); err != nil {
+				os.Remove(tmpPath)
+				return fmt.Errorf("failed to rename DNS config: %w", err)
+			}
+
+			return reloadDNSService()
+		}
+
+		return fallbackUpdateDNSFromState(state)
+	}
+
+	return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+}
+
+func fallbackUpdateDNSFromState(state *models.State) error {
 	config, err := RenderConfig(state)
 	if err != nil {
 		return fmt.Errorf("failed to render DNS config: %w", err)
 	}
 
-	// Atomic write
 	dnsDir := getDNSDir()
 	configPath := filepath.Join(dnsDir, dnsConfFile)
 	tmpPath := configPath + ".tmp"
@@ -68,14 +160,10 @@ func UpdateDNSFromState(state *models.State) error {
 		return fmt.Errorf("failed to rename DNS config: %w", err)
 	}
 
-	// Restart dnsmasq to ensure new config is loaded (more reliable than SIGHUP)
-	return restartDNSForReload()
+	return fallbackReloadDNS()
 }
 
-// UpdateDNS updates DNS entries for an environment (deprecated - use UpdateDNSFromState)
 func UpdateDNS(env *models.Environment) error {
-	// For backward compat, we need to load full state and render
-	// This is less efficient but maintains API compatibility
 	state, err := loadStateForDNS()
 	if err != nil {
 		return err
@@ -84,13 +172,11 @@ func UpdateDNS(env *models.Environment) error {
 }
 
 func loadStateForDNS() (*models.State, error) {
-	// Load state from state.json
 	statePath := config.GetStatePath()
 
 	data, err := os.ReadFile(statePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Return empty state if file doesn't exist
 			return &models.State{
 				Version: 2,
 				Hosts:   make(map[string]*models.Host),
@@ -107,19 +193,54 @@ func loadStateForDNS() (*models.State, error) {
 	return &state, nil
 }
 
-// RemoveDNS removes DNS entries for an environment
 func RemoveDNS(envName string) error {
+	if runtime.GOOS == "darwin" || (runtime.GOOS == "linux" && isDnsmasqManaged()) {
+		ciloConf := getCiloConfPath()
+
+		data, err := os.ReadFile(ciloConf)
+		if err != nil {
+			return nil
+		}
+
+		config := string(data)
+
+		startMarker := fmt.Sprintf("\n# Environment: %s\n", envName)
+		endMarker := fmt.Sprintf("\n# End environment: %s\n", envName)
+
+		for {
+			start := strings.Index(config, startMarker)
+			if start == -1 {
+				break
+			}
+			end := strings.Index(config[start:], endMarker)
+			if end == -1 {
+				config = config[:start]
+				break
+			}
+			config = config[:start] + config[start+end+len(endMarker):]
+		}
+
+		if err := os.WriteFile(ciloConf, []byte(config), 0644); err != nil {
+			return fmt.Errorf("failed to write dnsmasq config: %w", err)
+		}
+
+		return reloadDNSService()
+	}
+
+	return fallbackRemoveDNS(envName)
+}
+
+func fallbackRemoveDNS(envName string) error {
 	dnsDir := getDNSDir()
 	configPath := filepath.Join(dnsDir, dnsConfFile)
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return nil // Config doesn't exist, nothing to do
+		return nil
 	}
 
 	config := string(data)
 
-	// Remove entries for this environment
 	startMarker := fmt.Sprintf("\n# Environment: %s\n", envName)
 	endMarker := fmt.Sprintf("\n# End environment: %s\n", envName)
 
@@ -136,155 +257,57 @@ func RemoveDNS(envName string) error {
 		config = config[:start] + config[start+end+len(endMarker):]
 	}
 
-	// Write updated config
 	if err := os.WriteFile(configPath, []byte(config), 0644); err != nil {
 		return fmt.Errorf("failed to write dnsmasq config: %w", err)
 	}
 
-	// Reload dnsmasq
-	if err := reloadDNSRestart(); err != nil {
-		return err
-	}
-
-	return nil
+	return fallbackReloadDNS()
 }
 
-func startDNS() error {
+func reloadDNS() error {
+	if runtime.GOOS == "darwin" || (runtime.GOOS == "linux" && isDnsmasqManaged()) {
+		return reloadDNSService()
+	}
+	return fallbackReloadDNS()
+}
+
+func fallbackStartDNS() error {
 	if _, err := exec.LookPath("dnsmasq"); err != nil {
 		return fmt.Errorf("dnsmasq is not installed. Please install it:\n\n  macOS: brew install dnsmasq\n  Ubuntu/Debian: sudo apt install dnsmasq\n  Fedora: sudo dnf install dnsmasq\n  Arch: sudo pacman -S dnsmasq")
 	}
 
 	dnsDir := getDNSDir()
 	configPath := filepath.Join(dnsDir, dnsConfFile)
-	pidPath := filepath.Join(dnsDir, dnsPidFile)
 
-	_ = stopDNSFromAllKnownPidFiles()
-
-	cmd := exec.Command("dnsmasq", "--conf-file="+configPath, fmt.Sprintf("--pid-file=%s", pidPath))
+	cmd := exec.Command("dnsmasq", "--conf-file="+configPath)
 	if err := cmd.Start(); err != nil {
-		_ = stopDNSFromAllKnownPidFiles()
-		cmd2 := exec.Command("dnsmasq", "--conf-file="+configPath, fmt.Sprintf("--pid-file=%s", pidPath))
-		if err2 := cmd2.Start(); err2 != nil {
-			return fmt.Errorf("failed to start dnsmasq: %w", err)
-		}
+		return fmt.Errorf("failed to start dnsmasq: %w", err)
 	}
 
 	return nil
 }
 
-func reloadDNSGraceful() error {
+func fallbackReloadDNS() error {
+	if _, err := exec.LookPath("dnsmasq"); err != nil {
+		return nil
+	}
+
+	exec.Command("killall", "dnsmasq").Run()
+
 	dnsDir := getDNSDir()
-	pidPath := filepath.Join(dnsDir, dnsPidFile)
+	configPath := filepath.Join(dnsDir, dnsConfFile)
 
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		// Not running, start it
-		return startDNS()
-	}
-
-	pid := strings.TrimSpace(string(data))
-	pidInt := 0
-	fmt.Sscanf(pid, "%d", &pidInt)
-
-	if pidInt <= 0 {
-		return startDNS()
-	}
-
-	if !processExists(pidInt) {
-		return startDNS()
-	}
-
-	if err := syscall.Kill(pidInt, syscall.SIGHUP); err != nil {
-		if errors.Is(err, syscall.EPERM) {
-			cmd := exec.Command("sudo", "kill", "-HUP", fmt.Sprintf("%d", pidInt))
-			if err := cmd.Run(); err != nil {
-				_ = exec.Command("sudo", "kill", fmt.Sprintf("%d", pidInt)).Run()
-				time.Sleep(100 * time.Millisecond)
-				return startDNS()
-			}
-			return nil
-		}
-		return startDNS()
-	}
-
-	return nil
-}
-
-// restartDNSForReload stops and restarts dnsmasq to ensure config is reloaded
-// This is more reliable than SIGHUP for address= entries
-func restartDNSForReload() error {
-	dnsDir := getDNSDir()
-	pidPath := filepath.Join(dnsDir, dnsPidFile)
-
-	data, err := os.ReadFile(pidPath)
-	if err == nil {
-		pid := strings.TrimSpace(string(data))
-		pidInt := 0
-		fmt.Sscanf(pid, "%d", &pidInt)
-		if pidInt > 0 {
-			syscall.Kill(pidInt, syscall.SIGTERM)
-			time.Sleep(100 * time.Millisecond)
-		}
-	}
-
-	_ = os.Remove(pidPath)
-	return startDNS()
-}
-
-func processExists(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	if err == nil {
-		return true
-	}
-	return errors.Is(err, syscall.EPERM)
-}
-
-// reloadDNSRestart stops and restarts dnsmasq (use reloadDNSGraceful for config updates)
-func reloadDNSRestart() error {
-	dnsDir := getDNSDir()
-	pidPath := filepath.Join(dnsDir, dnsPidFile)
-
-	_ = stopDNSFromAllKnownPidFiles()
-
-	_ = os.Remove(pidPath)
-	return startDNS()
-}
-
-func stopDNSFromAllKnownPidFiles() error {
-	paths := []string{filepath.Join(getDNSDir(), dnsPidFile)}
-	if os.Geteuid() == 0 && os.Getenv("SUDO_USER") != "" {
-		paths = append(paths, "/var/root/.cilo/dns/"+dnsPidFile)
-	}
-
-	for _, pidPath := range paths {
-		data, err := os.ReadFile(pidPath)
-		if err != nil {
-			continue
-		}
-		pid := strings.TrimSpace(string(data))
-		pidInt := 0
-		fmt.Sscanf(pid, "%d", &pidInt)
-		if pidInt > 0 {
-			_ = syscall.Kill(pidInt, syscall.SIGTERM)
-			_ = exec.Command("sleep", "0.2").Run()
-		}
-		_ = os.Remove(pidPath)
-	}
+	cmd := exec.Command("dnsmasq", "--conf-file="+configPath)
+	cmd.Start()
 
 	return nil
 }
 
 func setupResolver(state *models.State) error {
-	// Check OS
 	if _, err := os.Stat("/etc/systemd"); err == nil {
-		// Linux with systemd
 		return setupSystemdResolved(state)
 	}
 
-	// macOS or other Unix
 	return setupMacOSResolver(state)
 }
 
@@ -348,7 +371,6 @@ var getDNSDir = func() string {
 	return config.GetDNSDir()
 }
 
-// GetDNSPort returns the configured DNS port
 func GetDNSPort(state *models.State) int {
 	if state != nil && state.DNSPort != 0 {
 		return state.DNSPort
@@ -356,26 +378,20 @@ func GetDNSPort(state *models.State) int {
 	return defaultDNSPort
 }
 
-// Cleanup stops dnsmasq and removes DNS configuration
 func Cleanup() error {
-	dnsDir := getDNSDir()
-	pidPath := filepath.Join(dnsDir, dnsPidFile)
-
-	data, err := os.ReadFile(pidPath)
-	if err != nil {
-		return nil // PID file doesn't exist
+	if runtime.GOOS == "darwin" {
+		ciloConf := getCiloConfPath()
+		os.Remove(ciloConf)
+		return reloadDNSService()
 	}
 
-	pid := strings.TrimSpace(string(data))
-	pidInt := 0
-	fmt.Sscanf(pid, "%d", &pidInt)
-
-	if pidInt > 0 {
-		// Send SIGTERM to stop
-		syscall.Kill(pidInt, syscall.SIGTERM)
+	if runtime.GOOS == "linux" {
+		if isDnsmasqManaged() {
+			ciloConf := getCiloConfPath()
+			os.Remove(ciloConf)
+			return reloadDNSService()
+		}
 	}
-
-	os.Remove(pidPath)
 
 	return nil
 }
