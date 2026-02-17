@@ -243,14 +243,15 @@ func runRemote(cmd *cobra.Command, args []string, target Target) error {
 	}
 
 	envVars := fmt.Sprintf("CILO_ENV=%s CILO_WORKSPACE=%s TERM=xterm-256color", envName, remoteWorkspace)
-	remoteCmd := fmt.Sprintf("cd %s && export %s && exec %s", remoteWorkspace, envVars, command)
+	innerCmd := command
 	for _, a := range cmdArgs {
-		remoteCmd += " " + a
+		innerCmd += " " + a
 	}
+	shellCmd := fmt.Sprintf("cd %s && export %s && exec %s", remoteWorkspace, envVars, innerCmd)
 
 	fmt.Printf("Launching %s in %s on %s...\n\n", command, envName, remoteHost)
 
-	sshArgs := []string{"ssh", "-t", remoteHost, remoteCmd}
+	sshArgs := []string{"ssh", "-t", remoteHost, fmt.Sprintf("bash -l -c '%s'", shellCmd)}
 	sshPath, err := exec.LookPath("ssh")
 	if err != nil {
 		return fmt.Errorf("ssh not found: %w", err)
