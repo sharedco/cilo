@@ -62,6 +62,29 @@ install-agent: build-agent
   sudo chmod +x /usr/local/bin/cilo-agent
   @echo "Installed cilo-agent to /usr/local/bin/cilo-agent"
 
+# Start the agent locally (requires sudo, reads keys from /etc/cilo/)
+run-agent:
+  #!/usr/bin/env bash
+  TAILSCALE_IP=$(tailscale ip -4 2>/dev/null || hostname -I | awk '{print $1}')
+  sudo -E bash -c "\
+    export CILO_AGENT_LISTEN=0.0.0.0:8081 \
+    CILO_WORKSPACE_DIR=/var/cilo/envs \
+    CILO_WG_INTERFACE=wg0 \
+    CILO_WG_PORT=51820 \
+    CILO_WG_ADDRESS=10.225.0.100/16 \
+    CILO_WG_ENDPOINT=${TAILSCALE_IP}:51820 \
+    CILO_WG_PRIVATE_KEY=\$(cat /etc/cilo/agent-private.key); \
+    /usr/local/bin/cilo-agent > /tmp/cilo-agent.log 2>&1 &"
+  sleep 2
+  if curl -s http://localhost:8081/health > /dev/null 2>&1; then
+    echo "✓ Agent running (PID: $(pgrep -x cilo-agent))"
+  else
+    echo "✗ Agent failed to start — check /tmp/cilo-agent.log"
+  fi
+
+# Reinstall and restart the agent (build + install + start)
+restart-agent: install-agent run-agent
+
 # Deploy agent to a remote Linux machine (cross-compile, scp, restart)
 # Usage: just deploy-agent user@host
 deploy-agent target: build-agent-linux
