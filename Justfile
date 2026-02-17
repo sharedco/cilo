@@ -62,6 +62,21 @@ install-agent: build-agent
   sudo chmod +x /usr/local/bin/cilo-agent
   @echo "Installed cilo-agent to /usr/local/bin/cilo-agent"
 
+# Deploy agent to a remote Linux machine (cross-compile, scp, restart)
+# Usage: just deploy-agent user@host
+deploy-agent target: build-agent-linux
+  @echo "Deploying cilo-agent to {{target}}..."
+  scp cilo-agent-linux {{target}}:/tmp/cilo-agent
+  ssh {{target}} 'sudo pkill -x cilo-agent 2>/dev/null; sleep 1; sudo cp /tmp/cilo-agent /usr/local/bin/cilo-agent && sudo chmod +x /usr/local/bin/cilo-agent && rm /tmp/cilo-agent && echo "✓ Agent binary installed"'
+  @echo "✓ Deployed. Restart the agent on {{target}} with the appropriate env vars."
+  @echo "  Or run: just start-remote-agent {{target}}"
+
+# Start the agent on a remote machine (requires keys at /etc/cilo/)
+start-remote-agent target:
+  ssh -t {{target}} 'TAILSCALE_IP=$$(tailscale ip -4 2>/dev/null || hostname -I | awk "{print \$$1}") && \
+    sudo -E bash -c "export CILO_AGENT_LISTEN=0.0.0.0:8081 CILO_WORKSPACE_DIR=/var/cilo/envs CILO_WG_INTERFACE=wg0 CILO_WG_PORT=51820 CILO_WG_ADDRESS=10.225.0.100/16 CILO_WG_ENDPOINT=$$TAILSCALE_IP:51820 CILO_WG_PRIVATE_KEY=\$$(cat /etc/cilo/agent-private.key); /usr/local/bin/cilo-agent > /tmp/cilo-agent.log 2>&1 &" && \
+    sleep 2 && curl -s http://localhost:8081/health && echo ""'
+
 # Show version reported by cilo binary
 version: build
   @./cilo --version
