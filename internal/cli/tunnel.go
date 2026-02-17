@@ -230,6 +230,10 @@ func StartTunnelDaemon(cfg *tunnel.DaemonConfig) error {
 		return fmt.Errorf("get executable: %w", err)
 	}
 
+	if os.Geteuid() != 0 && !canRunSudoNonInteractive() {
+		return fmt.Errorf("tunnel daemon requires sudo: run 'sudo cilo tunnel daemon'")
+	}
+
 	logDir, _ := tunnel.DaemonDir()
 	os.MkdirAll(logDir, 0755)
 	logFile, err := os.OpenFile(
@@ -241,7 +245,7 @@ func StartTunnelDaemon(cfg *tunnel.DaemonConfig) error {
 		return fmt.Errorf("create log file: %w", err)
 	}
 
-	cmd := exec.Command("sudo", "-b", executable, "tunnel", "daemon")
+	cmd := buildTunnelDaemonCommand(executable)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Stdin = nil
@@ -261,4 +265,16 @@ func StartTunnelDaemon(cfg *tunnel.DaemonConfig) error {
 	}
 
 	return fmt.Errorf("daemon failed to start within 3 seconds")
+}
+
+func buildTunnelDaemonCommand(executable string) *exec.Cmd {
+	if os.Geteuid() == 0 {
+		return exec.Command(executable, "tunnel", "daemon")
+	}
+	return exec.Command("sudo", "-n", "-b", executable, "tunnel", "daemon")
+}
+
+func canRunSudoNonInteractive() bool {
+	cmd := exec.Command("sudo", "-n", "true")
+	return cmd.Run() == nil
 }
