@@ -6,9 +6,11 @@ package tunnel
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -180,8 +182,13 @@ func LoadDaemonState() (*DaemonState, error) {
 	// Verify the process is actually running
 	if state.Running && state.PID > 0 {
 		process, err := os.FindProcess(state.PID)
-		if err != nil || process.Signal(syscall.Signal(0)) != nil {
+		if err != nil {
 			state.Running = false
+		} else if sigErr := process.Signal(syscall.Signal(0)); sigErr != nil {
+			// EPERM means the process exists but we lack permission (root daemon, non-root caller)
+			if !errors.Is(sigErr, syscall.EPERM) {
+				state.Running = false
+			}
 		}
 	}
 
@@ -302,6 +309,7 @@ func (d *Daemon) Run() error {
 	if err != nil {
 		fmt.Printf("Warning: failed to create control socket: %v\n", err)
 	} else {
+		os.Chmod(sockPath, 0666)
 		go d.handleControlSocket()
 	}
 
@@ -388,36 +396,54 @@ func StopDaemon() error {
 		return err
 	}
 
-	if !state.Running {
-		return fmt.Errorf("daemon is not running")
-	}
-
-	sockPath, err := socketPath()
-	if err != nil {
-		return err
-	}
-
-	conn, err := net.Dial("unix", sockPath)
-	if err != nil {
-		// Socket not available, try to kill the process directly
-		if state.PID > 0 {
-			process, err := os.FindProcess(state.PID)
-			if err == nil {
-				process.Signal(syscall.SIGTERM)
-			}
-		}
+	if !state.Running || state.PID <= 0 {
 		ClearDaemonState()
 		return nil
 	}
-	defer conn.Close()
 
-	conn.Write([]byte("stop"))
+	sockPath, err := socketPath()
+	if err == nil {
+		if conn, err := net.Dial("unix", sockPath); err == nil {
+			conn.Write([]byte("stop"))
+			buf := make([]byte, 256)
+			conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+			conn.Read(buf)
+			conn.Close()
 
-	buf := make([]byte, 256)
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	conn.Read(buf)
+			for i := 0; i < 30; i++ {
+				time.Sleep(100 * time.Millisecond)
+				if !isProcessAlive(state.PID) {
+					ClearDaemonState()
+					return nil
+				}
+			}
+		}
+	}
 
+	killDaemonProcess(state.PID)
+
+	for i := 0; i < 20; i++ {
+		time.Sleep(100 * time.Millisecond)
+		if !isProcessAlive(state.PID) {
+			ClearDaemonState()
+			return nil
+		}
+	}
+
+	ClearDaemonState()
 	return nil
+}
+
+func isProcessAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+func killDaemonProcess(pid int) {
+	if err := syscall.Kill(pid, syscall.SIGKILL); err == nil {
+		return
+	}
+	exec.Command("sudo", "-n", "kill", "-9", fmt.Sprintf("%d", pid)).Run()
 }
 
 // GetDaemonStatus returns the current daemon status
@@ -439,7 +465,6 @@ func GetDaemonStatus() (*DaemonState, error) {
 
 	conn, err := net.Dial("unix", sockPath)
 	if err != nil {
-		state.Running = false
 		return state, nil
 	}
 	defer conn.Close()

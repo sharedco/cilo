@@ -137,15 +137,15 @@ func killTunnelDaemons() error {
 		return nil
 	}
 
+	myPid := os.Getpid()
 	for _, field := range strings.Fields(string(output)) {
 		pid, err := strconv.Atoi(field)
-		if err != nil {
+		if err != nil || pid == myPid {
 			continue
 		}
-		if pid == os.Getpid() {
-			continue
+		if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+			exec.Command("sudo", "-n", "kill", "-9", field).Run()
 		}
-		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
 
 	return nil
@@ -193,7 +193,7 @@ Requires sudo. Use this for a completely fresh start.`,
 		fmt.Println("Removing all cilo state...")
 
 		fmt.Print("  → Killing tunnel processes... ")
-		exec.Command("pkill", "-9", "-f", "cilo tunnel").Run()
+		_ = killTunnelDaemons()
 		fmt.Println("done")
 
 		fmt.Print("  → Removing tunnel state... ")
@@ -243,6 +243,11 @@ func init() {
 }
 
 func StartTunnelDaemon(cfg *tunnel.DaemonConfig) error {
+	if state, err := tunnel.LoadDaemonState(); err == nil && state.Running {
+		tunnel.StopDaemon()
+	}
+	killTunnelDaemons()
+
 	if err := tunnel.SaveDaemonConfig(cfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
@@ -278,7 +283,7 @@ func StartTunnelDaemon(cfg *tunnel.DaemonConfig) error {
 	}
 	logFile.Close()
 
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 100; i++ {
 		time.Sleep(100 * time.Millisecond)
 		state, err := tunnel.LoadDaemonState()
 		if err == nil && state.Running {
@@ -286,7 +291,7 @@ func StartTunnelDaemon(cfg *tunnel.DaemonConfig) error {
 		}
 	}
 
-	return fmt.Errorf("daemon failed to start within 3 seconds")
+	return fmt.Errorf("daemon failed to start within 10 seconds")
 }
 
 func buildTunnelDaemonCommand(executable string) *exec.Cmd {

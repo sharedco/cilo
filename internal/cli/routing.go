@@ -82,7 +82,11 @@ func resolveTarget(cmd *cobra.Command) (Target, error) {
 		return nil, fmt.Errorf("machine '%s' is not connected. Run 'cilo connect %s' first", onFlag, onFlag)
 	}
 
-	client := cilod.NewClient(machine.WGAssignedIP, machine.Token)
+	// For HTTP API calls, use the original Tailscale/SSH host (not WireGuard IP).
+	// WireGuard tunnel is for data traffic; control API uses the direct network path.
+	// The token saved is a tailscale-* token which the agent accepts when requests come from Tailnet.
+	apiHost := onFlag
+	client := cilod.NewClient(apiHost, machine.Token)
 
 	return RemoteTarget{
 		Machine: onFlag,
@@ -126,13 +130,12 @@ func GetMachine(host string) (*Machine, error) {
 	return &machine, nil
 }
 
-// IsConnected checks if a machine is currently connected
 func IsConnected(host string) bool {
 	machine, err := GetMachine(host)
-	if err != nil {
+	if err != nil || machine == nil {
 		return false
 	}
-	return machine != nil
+	return machine.Status == "connected"
 }
 
 // ListConnectedMachines returns all connected machines

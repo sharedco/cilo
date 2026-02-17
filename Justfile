@@ -52,6 +52,7 @@ dev-install: dev
 # Install cilo to /usr/local/bin (requires sudo)
 install: build
   sudo cp cilo /usr/local/bin/
+  sudo codesign --force --sign - /usr/local/bin/cilo 2>/dev/null || true
   @echo "Installed to /usr/local/bin/cilo"
 
 # Install cilo-agent to /usr/local/bin (requires sudo, forces rebuild)
@@ -173,8 +174,7 @@ add-machine-ts name tailscale-ip user:
 # Clean up all tunnel state (kills processes, removes state files)
 tunnel-clean:
   @echo "Cleaning up tunnel state..."
-  sudo pkill -9 -f "cilo tunnel" || true
-  sudo rm -rf ~/.cilo/tunnel
+  sudo cilo tunnel clean
   @echo "✓ Tunnel cleaned. Run 'sudo cilo cloud up <name>' to restart."
 
 # Clean slate - destroy all environments, remove all state, ready for fresh init
@@ -201,9 +201,7 @@ clean-slate:
 clean-all:
   @echo "🧹 Nuclear clean - removing ALL cilo state..."
   @echo "  → Killing tunnel processes..."
-  sudo pkill -9 -f "cilo tunnel" || true
-  @echo "  → Removing tunnel state..."
-  sudo rm -rf ~/.cilo/tunnel
+  sudo cilo tunnel clean 2>/dev/null || true
   @echo "  → Removing cloud state and auth..."
   rm -f ~/.cilo/state.json ~/.cilo/cloud-auth.json
   @echo "  → Removing DNS config..."

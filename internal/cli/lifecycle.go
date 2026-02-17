@@ -628,15 +628,17 @@ func upRemote(cmd *cobra.Command, args []string, target Target) error {
 		return fmt.Errorf("machine '%s' not found", target.GetMachine())
 	}
 
-	// Use the WireGuard assigned IP for SSH (through the tunnel)
-	remoteHost := machine.WGAssignedIP
-	if remoteHost == "" {
-		// Fallback to the machine host if WG IP is not available
-		remoteHost = target.GetMachine()
+	// Use the original host (Tailscale IP) for rsync/SSH, not the WireGuard IP.
+	remoteHost := target.GetMachine()
+	// Strip port from host for rsync
+	if idx := strings.LastIndex(remoteHost, ":"); idx > 0 {
+		remoteHost = remoteHost[:idx]
 	}
 
-	// Remote workspace path
-	remoteWorkspace := fmt.Sprintf("/var/cilo/envs/%s/%s", project, name)
+	// Remote workspace path — use flat structure matching the agent's expected layout.
+	// The agent scans workspaceRoot/<env-name>/ directly.
+	_ = project
+	remoteWorkspace := fmt.Sprintf("/var/cilo/envs/%s", name)
 
 	fmt.Printf("Syncing workspace to %s...\n", target.GetMachine())
 	syncOpts := sync.SyncOptions{

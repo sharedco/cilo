@@ -67,8 +67,13 @@ Examples:
 func runConnect(host string) error {
 	fmt.Printf("Connecting to %s...\n", host)
 
-	if IsConnected(host) {
-		return fmt.Errorf("machine already connected: %s", host)
+	if existing, _ := GetMachine(host); existing != nil {
+		if isTunnelHealthy(existing) {
+			fmt.Printf("✓ Already connected to %s (tunnel healthy)\n", host)
+			return nil
+		}
+		fmt.Println("  Existing connection unhealthy, reconnecting...")
+		cleanupMachine(host)
 	}
 
 	resolvedHost := resolveHostWithPort(host)
@@ -127,7 +132,7 @@ func runConnect(host string) error {
 		WGInterface:       defaultTunnelInterface(),
 		EnvironmentSubnet: wgConfig.EnvironmentSubnet,
 		ConnectedAt:       time.Now(),
-		Status:            "connected",
+		Status:            "connecting",
 		Version:           1,
 	}
 
@@ -136,7 +141,13 @@ func runConnect(host string) error {
 	}
 
 	if err := ensureTunnelForMachine(machine); err != nil {
+		RemoveMachine(host)
 		return fmt.Errorf("failed to start WireGuard tunnel: %w", err)
+	}
+
+	machine.Status = "connected"
+	if err := SaveMachine(machine); err != nil {
+		return fmt.Errorf("failed to update machine state: %w", err)
 	}
 
 	envCount := 0
@@ -345,6 +356,24 @@ func GetRemoteEnvironments(host, token string) ([]string, error) {
 		result[i] = env.Name
 	}
 	return result, nil
+}
+
+func isTunnelHealthy(machine *Machine) bool {
+	state, err := tunnel.GetDaemonStatus()
+	if err != nil || !state.Running {
+		return false
+	}
+	if state.EnvironmentID != machine.Host {
+		return false
+	}
+	cmd := exec.Command("ping", "-c", "1", "-W", "2", "10.225.0.100")
+	return cmd.Run() == nil
+}
+
+func cleanupMachine(host string) {
+	_ = stopTunnelForMachine(host)
+	_ = dns.RemoveRemoteMachine(host)
+	_ = RemoveMachine(host)
 }
 
 func ensureTunnelForMachine(machine *Machine) error {

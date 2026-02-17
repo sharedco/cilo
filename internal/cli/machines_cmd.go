@@ -57,7 +57,7 @@ Use --json for machine-readable output.`,
 				ConnectedAt: m.ConnectedAt,
 			}
 
-			client := cilod.NewClient(m.WGAssignedIP, m.Token)
+			client := cilod.NewClient(resolveHostWithPort(m.Host), m.Token)
 			client.SetTimeout(5 * time.Second)
 			envs, err := client.ListEnvironments()
 			if err != nil {

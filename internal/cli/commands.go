@@ -63,7 +63,7 @@ with the machine name in the MACHINE column. Local environments show as "local".
 		}
 
 		for _, machine := range machines {
-			client := cilod.NewClient(machine.WGAssignedIP, machine.Token)
+			client := cilod.NewClient(resolveHostWithPort(machine.Host), machine.Token)
 			remoteEnvs, err := client.ListEnvironments()
 			if err != nil {
 				unifiedEnvs = append(unifiedEnvs, envWithMachine{
