@@ -155,9 +155,10 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 		composeFiles = append(composeFiles, "-f", ".cilo/override.yml")
 	}
 
-	args := append(composeFiles, "up", "-d")
+	projectName := fmt.Sprintf("cilo_%s", req.EnvName)
+	args := append([]string{"-p", projectName}, composeFiles...)
+	args = append(args, "up", "-d")
 
-	// Add optional flags
 	if req.Build {
 		args = append(args, "--build")
 	}
@@ -165,7 +166,6 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 		args = append(args, "--force-recreate")
 	}
 
-	// Execute docker compose up
 	cmd := exec.CommandContext(ctx, "docker", append([]string{"compose"}, args...)...)
 	cmd.Dir = workspacePath
 
@@ -219,7 +219,8 @@ func (m *EnvironmentManager) Down(ctx context.Context, envName string) error {
 
 	log.Printf("Stopping environment %s", envName)
 
-	cmd := exec.CommandContext(ctx, "docker", "compose", "down")
+	projectName := fmt.Sprintf("cilo_%s", envName)
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", projectName, "down")
 	cmd.Dir = workspacePath
 
 	var stderr bytes.Buffer
@@ -248,7 +249,8 @@ func (m *EnvironmentManager) Status(ctx context.Context, envName string) (map[st
 		return nil, fmt.Errorf("workspace does not exist: %s", workspacePath)
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", "compose", "ps", "--format", "json")
+	projectName := fmt.Sprintf("cilo_%s", envName)
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", projectName, "ps", "--format", "json")
 	cmd.Dir = workspacePath
 
 	var stdout, stderr bytes.Buffer
@@ -307,7 +309,8 @@ func (m *EnvironmentManager) Logs(ctx context.Context, envName, service string, 
 		return nil, fmt.Errorf("workspace does not exist: %s", workspacePath)
 	}
 
-	args := []string{"compose", "logs"}
+	projectName := fmt.Sprintf("cilo_%s", envName)
+	args := []string{"compose", "-p", projectName, "logs"}
 	if follow {
 		args = append(args, "-f")
 	}
@@ -344,7 +347,8 @@ func (m *EnvironmentManager) Destroy(ctx context.Context, envName string) error 
 
 	// Stop containers first
 	if _, err := os.Stat(workspacePath); err == nil {
-		cmd := exec.CommandContext(ctx, "docker", "compose", "down", "-v")
+		projectName := fmt.Sprintf("cilo_%s", envName)
+		cmd := exec.CommandContext(ctx, "docker", "compose", "-p", projectName, "down", "-v")
 		cmd.Dir = workspacePath
 		if err := cmd.Run(); err != nil {
 			log.Printf("Warning: docker compose down failed: %v", err)
@@ -445,7 +449,8 @@ func (m *EnvironmentManager) generateOverride(workspacePath, envName, subnet str
 // getServiceIPs retrieves IP addresses for all services in the environment
 func (m *EnvironmentManager) getServiceIPs(ctx context.Context, workspacePath, envName string) (map[string]string, error) {
 	// Get list of services from docker compose
-	cmd := exec.CommandContext(ctx, "docker", "compose", "ps", "--format", "json")
+	projectName := fmt.Sprintf("cilo_%s", envName)
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-p", projectName, "ps", "--format", "json")
 	cmd.Dir = workspacePath
 
 	var stdout bytes.Buffer
@@ -488,8 +493,10 @@ func (m *EnvironmentManager) getServiceIPs(ctx context.Context, workspacePath, e
 }
 
 func (m *EnvironmentManager) getContainerIP(ctx context.Context, containerName, envName string) (string, error) {
+	projectName := fmt.Sprintf("cilo_%s", envName)
 	networks := []string{
-		fmt.Sprintf("cilo_%s", envName),
+		projectName,
+		fmt.Sprintf("%s_default", projectName),
 		fmt.Sprintf("%s_default", envName),
 	}
 
