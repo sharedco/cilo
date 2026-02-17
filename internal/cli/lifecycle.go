@@ -660,29 +660,24 @@ func upRemote(cmd *cobra.Command, args []string, target Target) error {
 
 	fmt.Printf("Starting environment %s/%s on %s...\n", project, name, target.GetMachine())
 
-	resp, err := client.UpEnvironmentWithResponse(name, opts)
-	if err != nil {
+	if err := client.UpEnvironment(name, opts); err != nil {
 		return fmt.Errorf("failed to start environment on remote machine: %w", err)
 	}
 
-	if resp != nil && len(resp.Services) > 0 {
-		dnsIP := machine.WGServerAddress
-		if dnsIP == "" {
-			dnsIP = "10.225.0.100"
-		}
-		var services []string
-		for svcName := range resp.Services {
-			services = append(services, svcName)
-		}
-		remoteMachine := &dns.RemoteMachine{
-			Host:         target.GetMachine(),
-			WGAssignedIP: dnsIP,
-		}
-		envs := []cilod.Environment{{Name: name, Services: services}}
-		if err := dns.AddRemoteMachine(remoteMachine, envs); err != nil {
+	dnsIP := machine.WGServerAddress
+	if dnsIP == "" {
+		dnsIP = "10.225.0.100"
+	}
+	remoteMachine := &dns.RemoteMachine{
+		Host:         target.GetMachine(),
+		WGAssignedIP: dnsIP,
+	}
+	allEnvs, err := client.ListEnvironments()
+	if err == nil && len(allEnvs) > 0 {
+		if err := dns.AddRemoteMachine(remoteMachine, allEnvs); err != nil {
 			fmt.Printf("  Warning: failed to update DNS entries: %v\n", err)
 		} else {
-			fmt.Printf("  ✓ DNS entries updated\n")
+			fmt.Printf("  ✓ DNS entries updated (%d environments)\n", len(allEnvs))
 		}
 	}
 
