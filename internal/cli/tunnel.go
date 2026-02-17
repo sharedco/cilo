@@ -93,7 +93,7 @@ Requires sudo.`,
 		fmt.Println("Cleaning up tunnel state...")
 
 		fmt.Print("  → Killing tunnel processes... ")
-		killCmd := exec.Command("pkill", "-9", "-f", "cilo tunnel")
+		killCmd := exec.Command("pkill", "-9", "-f", "cilo tunnel daemon")
 		killCmd.Run()
 		fmt.Println("done")
 
