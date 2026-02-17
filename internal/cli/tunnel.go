@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/sharedco/cilo/internal/cloud/tunnel"
@@ -93,8 +95,7 @@ Requires sudo.`,
 		fmt.Println("Cleaning up tunnel state...")
 
 		fmt.Print("  → Killing tunnel processes... ")
-		killCmd := exec.Command("pkill", "-9", "-f", "cilo tunnel daemon")
-		killCmd.Run()
+		_ = killTunnelDaemons()
 		fmt.Println("done")
 
 		fmt.Print("  → Removing state files... ")
@@ -127,6 +128,27 @@ Requires sudo.`,
 		fmt.Println("\nYou can now run: sudo cilo cloud up <name>")
 		return nil
 	},
+}
+
+func killTunnelDaemons() error {
+	cmd := exec.Command("pgrep", "-f", "cilo tunnel daemon")
+	output, err := cmd.Output()
+	if err != nil || len(output) == 0 {
+		return nil
+	}
+
+	for _, field := range strings.Fields(string(output)) {
+		pid, err := strconv.Atoi(field)
+		if err != nil {
+			continue
+		}
+		if pid == os.Getpid() {
+			continue
+		}
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+
+	return nil
 }
 
 var tunnelDaemonCmd = &cobra.Command{
