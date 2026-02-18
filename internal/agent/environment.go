@@ -178,8 +178,9 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 	}
 
 	sharedIPs := make(map[string]string)
+	var shareMgr *share.Manager
 	if len(sharedServices) > 0 {
-		shareMgr := share.NewManagerWithStore(m, m.sharedStore, ctx)
+		shareMgr = share.NewManagerWithStore(m, m.sharedStore, ctx)
 		for _, svc := range sharedServices {
 			containerName, ip, err := shareMgr.EnsureSharedService(svc, projectNameForShared, composeFiles)
 			if err != nil {
@@ -189,21 +190,6 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 			if err := shareMgr.RegisterSharedService(svc, projectNameForShared, containerName, ip, composeFiles); err != nil {
 				return nil, fmt.Errorf("failed to register shared service %s: %w", svc, err)
 			}
-
-			if err := shareMgr.ConnectSharedServiceToEnvironment(svc, projectNameForShared, req.EnvName); err != nil {
-				return nil, fmt.Errorf("failed to connect shared service %s: %w", svc, err)
-			}
-
-			netIP, err := shareMgr.GetSharedServiceIP(svc, projectNameForShared, req.EnvName)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get shared service IP %s: %w", svc, err)
-			}
-
-			if err := shareMgr.AddEnvironmentReference(svc, projectNameForShared, projectNameForShared, req.EnvName); err != nil {
-				return nil, fmt.Errorf("failed to add shared service reference %s: %w", svc, err)
-			}
-
-			sharedIPs[svc] = netIP
 		}
 	}
 
@@ -244,6 +230,25 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 	}
 
 	log.Printf("Docker compose up completed for %s", req.EnvName)
+
+	if shareMgr != nil {
+		for _, svc := range sharedServices {
+			if err := shareMgr.ConnectSharedServiceToEnvironment(svc, projectNameForShared, req.EnvName); err != nil {
+				return nil, fmt.Errorf("failed to connect shared service %s: %w", svc, err)
+			}
+
+			netIP, err := shareMgr.GetSharedServiceIP(svc, projectNameForShared, req.EnvName)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get shared service IP %s: %w", svc, err)
+			}
+
+			if err := shareMgr.AddEnvironmentReference(svc, projectNameForShared, projectNameForShared, req.EnvName); err != nil {
+				return nil, fmt.Errorf("failed to add shared service reference %s: %w", svc, err)
+			}
+
+			sharedIPs[svc] = netIP
+		}
+	}
 
 	// Get service IPs
 	services, err := m.getServiceIPs(ctx, workspacePath, req.EnvName)
