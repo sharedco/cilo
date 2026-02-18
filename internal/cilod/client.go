@@ -159,6 +159,8 @@ func (c *Client) UpEnvironment(name string, opts UpOptions) error {
 		WorkspacePath: opts.WorkspacePath,
 		Build:         opts.Build,
 		Recreate:      opts.Recreate,
+		Shared:        opts.Shared,
+		Isolate:       opts.Isolate,
 	}
 	path := fmt.Sprintf("/environments/%s/up", name)
 	var resp EnvironmentUpResponse
@@ -170,6 +172,8 @@ func (c *Client) UpEnvironmentWithResponse(name string, opts UpOptions) (*Enviro
 		WorkspacePath: opts.WorkspacePath,
 		Build:         opts.Build,
 		Recreate:      opts.Recreate,
+		Shared:        opts.Shared,
+		Isolate:       opts.Isolate,
 	}
 	path := fmt.Sprintf("/environments/%s/up", name)
 	var resp EnvironmentUpResponse

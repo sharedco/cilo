@@ -62,9 +62,11 @@ type ListEnvironmentsResponse struct {
 // EnvironmentUpRequest starts or creates an environment
 // POST /environments/:name/up
 type EnvironmentUpRequest struct {
-	WorkspacePath string `json:"workspace_path,omitempty"` // Optional: override workspace
-	Build         bool   `json:"build,omitempty"`          // Rebuild containers
-	Recreate      bool   `json:"recreate,omitempty"`       // Force recreate
+	WorkspacePath string   `json:"workspace_path,omitempty"` // Optional: override workspace
+	Build         bool     `json:"build,omitempty"`          // Rebuild containers
+	Recreate      bool     `json:"recreate,omitempty"`       // Force recreate
+	Shared        []string `json:"shared,omitempty"`
+	Isolate       []string `json:"isolate,omitempty"`
 }
 
 // EnvironmentUpResponse confirms environment is running
@@ -208,4 +210,6 @@ type UpOptions struct {
 	WorkspacePath string
 	Build         bool
 	Recreate      bool
+	Shared        []string
+	Isolate       []string
 }

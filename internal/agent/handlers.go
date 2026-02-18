@@ -77,6 +77,8 @@ func (s *Server) HandleEnvironmentUp(w http.ResponseWriter, r *http.Request) {
 		WorkspacePath: req.WorkspacePath,
 		Build:         req.Build,
 		Recreate:      req.Recreate,
+		Shared:        req.Shared,
+		Isolate:       req.Isolate,
 	}
 
 	resp, err := s.envManager.Up(r.Context(), upReq)
