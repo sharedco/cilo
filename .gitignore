@@ -2,6 +2,7 @@
 /cilo
 /cilo-server
 /cilo-agent
+/cilo-agent-linux
 /cilo-wg-helper
 
 # Build directories
