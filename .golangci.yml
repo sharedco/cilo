@@ -1,0 +1,95 @@
+run:
+  timeout: 5m
+  tests: true
+  build-tags: []
+  skip-dirs:
+    - vendor
+    - .opencode
+  skip-files: []
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  
+  gosimple:
+    go: "1.24"
+  
+  govet:
+    check-shadowing: true
+    enable-all: true
+  
+  ineffassign:
+    check-blank: true
+  
+  staticcheck:
+    go: "1.24"
+    checks: ["all"]
+  
+  unused:
+    check-exported: false
+  
+  gofmt:
+    simplify: true
+  
+  goimports:
+    local-prefixes: github.com/sharedco/cilo
+  
+  misspell:
+    locale: US
+  
+  revive:
+    ignore-generated-header: true
+    severity: warning
+    confidence: 0.8
+
+linters:
+  enable:
+    - errcheck      # Checks for unchecked errors
+    - gosimple      # Linter for Go source code that specializes in simplifying code
+    - govet         # Vet examines Go source code and reports suspicious constructs
+    - ineffassign   # Detects when assignments to existing variables are not used
+    - staticcheck   # Go static analysis, detects bugs and performance issues
+    - unused        # Checks Go code for unused constants, variables, functions and types
+    - gofmt         # Checks whether code was gofmt-ed
+    - goimports     # Checks import statements are formatted according to the 'goimports' command
+    - misspell      # Finds commonly misspelled English words in comments
+    - revive        # Fast, configurable, extensible, flexible, and beautiful linter for Go
+    - deadcode      # Finds unused code
+    - structcheck   # Finds unused struct fields
+    - varcheck      # Finds unused global variables and constants
+  
+  disable:
+    - golint        # Deprecated, replaced by revive
+    - interfacer    # Deprecated
+    - scopelint     # Deprecated, replaced by exportloopref
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gosec
+        - errcheck
+    
+    # Exclude known linter issues
+    - text: "weak cryptographic primitive"
+      linters:
+        - gosec
+    
+    # Exclude shadow checking in tests
+    - path: _test\.go
+      text: "shadow"
+      linters:
+        - govet

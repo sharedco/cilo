@@ -1,0 +1,9 @@
+{
+  "active_plan": "/var/deployment/sharedco/cilo/.sisyphus/plans/cloud-redesign.md",
+  "started_at": "2026-02-10T17:18:44.176Z",
+  "session_ids": [
+    "ses_3b7a2c315ffesLyg48X4Y3gKq2"
+  ],
+  "plan_name": "cloud-redesign",
+  "agent": "atlas"
+}

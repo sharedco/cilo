@@ -1,0 +1,31 @@
+{
+    # Global options
+    email {$CILO_ADMIN_EMAIL:admin@example.com}
+}
+
+{$CILO_DOMAIN} {
+    # Reverse proxy to cilo-server
+    reverse_proxy server:8080
+    
+    # Enable compression
+    encode gzip
+    
+    # Security headers
+    header {
+        # HSTS
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        # Prevent clickjacking
+        X-Frame-Options "DENY"
+        # XSS protection
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+        # Remove server header
+        -Server
+    }
+    
+    # Logging
+    log {
+        output stdout
+        format console
+    }
+}

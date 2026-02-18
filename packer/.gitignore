@@ -1,0 +1,7 @@
+# Packer
+*.pkrvars.hcl
+crash.log
+packer_cache/
+
+# Secrets
+*.auto.pkrvars.hcl

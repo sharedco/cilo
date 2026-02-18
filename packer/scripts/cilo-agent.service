@@ -1,0 +1,27 @@
+[Unit]
+Description=Cilo Agent
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Environment=CILO_WORKSPACE_DIR=/var/lib/cilo/envs
+Environment=CILO_WG_INTERFACE=wg0
+Environment=CILO_AGENT_LISTEN=0.0.0.0:8080
+ExecStart=/usr/local/bin/cilo-agent
+Restart=always
+RestartSec=5
+
+# Security
+NoNewPrivileges=false
+ProtectSystem=full
+ProtectHome=read-only
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cilo-agent
+
+[Install]
+WantedBy=multi-user.target

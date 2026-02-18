@@ -1,0 +1,63 @@
+{
+  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-opencode/master/assets/oh-my-opencode.schema.json",
+  "google_auth": false,
+  "agents": {
+    "prometheus": {
+      "model": "opencode/gpt-5.2"
+    },
+    "sisyphus": {
+      "model": "opencode/claude-opus-4-5"
+    },
+    "sisyphus-junior": {
+      "model": "opencode/claude-sonnet-4-5"
+    },
+    "hephaestus": {
+      "model": "opencode/gpt-5.2-codex"
+    },
+    "atlas": {
+      "model": "opencode/kimi-k2.5"
+    },
+    "librarian": {
+      "model": "opencode/claude-sonnet-4-5"
+    },
+    "explore": {
+      "model": "opencode/kimi-k2.5"
+    },
+    "oracle": {
+      "model": "opencode/gpt-5.2"
+    },
+    "metis": {
+      "model": "opencode/claude-sonnet-4-5"
+    },
+    "momus": {
+      "model": "opencode/claude-sonnet-4-5"
+    },
+    "general": {
+      "model": "opencode/claude-sonnet-4-5"
+    },
+    "plan": {
+      "model": "opencode/gpt-5.2"
+    },
+    "build": {
+      "model": "opencode/claude-sonnet-4-5"
+    },
+    "frontend-ui-ux-engineer": {
+      "model": "opencode/gemini-3-pro"
+    },
+    "document-writer": {
+      "model": "opencode/gemini-3-flash"
+    },
+    "multimodal-looker": {
+      "model": "opencode/gemini-3-flash"
+    },
+    "codebase-locator": {
+      "model": "opencode/kimi-k2.5"
+    },
+    "codebase-analyzer": {
+      "model": "opencode/claude-sonnet-4-5"
+    },
+    "codebase-pattern-finder": {
+      "model": "opencode/claude-sonnet-4-5"
+    }
+  }
+}
