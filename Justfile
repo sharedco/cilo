@@ -81,6 +81,11 @@ run-agent:
 # Reinstall and restart the agent (build + install + start)
 restart-agent: install-agent run-agent
 
+# Stop the agent locally (requires sudo)
+stop-agent:
+  sudo pkill -x cilo-agent 2>/dev/null || true
+  @echo "✓ Stopped cilo-agent (if running)"
+
 # Deploy agent to a remote Linux machine (cross-compile, scp, restart)
 # Usage: just deploy-agent user@host
 deploy-agent target: build-agent-linux
