@@ -266,27 +266,32 @@ func extractNamedVolumes(volumeMounts []string) []string {
 // ConnectSharedServiceToEnvironment attaches shared container to env network with alias
 func (m *Manager) ConnectSharedServiceToEnvironment(serviceName, project, envName string) error {
 	containerName := fmt.Sprintf("cilo_shared_%s_%s", project, serviceName)
-	networkName := fmt.Sprintf("cilo_%s", envName)
-
-	// Connect with alias so containers in the environment can resolve by service name
-	if err := m.provider.ConnectContainerToNetwork(m.ctx, containerName, networkName, serviceName); err != nil {
-		return fmt.Errorf("failed to connect to network: %w", err)
+	for _, networkName := range environmentNetworkCandidates(envName) {
+		if err := m.provider.ConnectContainerToNetwork(m.ctx, containerName, networkName, serviceName); err == nil {
+			return nil
+		}
 	}
 
-	return nil
+	return fmt.Errorf("failed to connect container %s to any environment network", containerName)
 }
 
 // DisconnectSharedServiceFromEnvironment removes network attachment
 func (m *Manager) DisconnectSharedServiceFromEnvironment(serviceName, project, envName string) error {
 	containerName := fmt.Sprintf("cilo_shared_%s_%s", project, serviceName)
-	networkName := fmt.Sprintf("cilo_%s", envName)
-
-	if err := m.provider.DisconnectContainerFromNetwork(m.ctx, containerName, networkName); err != nil {
-		// Don't fail if already disconnected
-		if strings.Contains(err.Error(), "is not connected to") {
-			return nil
+	var lastErr error
+	for _, networkName := range environmentNetworkCandidates(envName) {
+		if err := m.provider.DisconnectContainerFromNetwork(m.ctx, containerName, networkName); err != nil {
+			if strings.Contains(err.Error(), "is not connected to") || strings.Contains(err.Error(), "No such network") {
+				continue
+			}
+			lastErr = err
+			continue
 		}
-		return fmt.Errorf("failed to disconnect from network: %w", err)
+		return nil
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("failed to disconnect from environment networks: %w", lastErr)
 	}
 
 	return nil
@@ -295,14 +300,14 @@ func (m *Manager) DisconnectSharedServiceFromEnvironment(serviceName, project, e
 // GetSharedServiceIP returns IP of shared container for a specific environment network
 func (m *Manager) GetSharedServiceIP(serviceName, project, envName string) (string, error) {
 	containerName := fmt.Sprintf("cilo_shared_%s_%s", project, serviceName)
-	networkName := fmt.Sprintf("cilo_%s", envName)
-
-	ip, err := m.provider.GetContainerIPForNetwork(m.ctx, containerName, networkName)
-	if err != nil {
-		return "", fmt.Errorf("failed to get IP: %w", err)
+	for _, networkName := range environmentNetworkCandidates(envName) {
+		ip, err := m.provider.GetContainerIPForNetwork(m.ctx, containerName, networkName)
+		if err == nil {
+			return ip, nil
+		}
 	}
 
-	return ip, nil
+	return "", fmt.Errorf("failed to get shared service IP on environment networks")
 }
 
 // RegisterSharedService adds or updates a shared service in state
@@ -453,4 +458,9 @@ func (m *Manager) startContainer(containerName string) error {
 
 func GetSharedServiceKey(project, serviceName string) string {
 	return sharestore.Key(project, serviceName)
+}
+
+func environmentNetworkCandidates(envName string) []string {
+	projectName := fmt.Sprintf("cilo_%s", envName)
+	return []string{projectName, fmt.Sprintf("%s_default", projectName), fmt.Sprintf("%s_default", envName)}
 }
