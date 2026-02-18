@@ -27,6 +27,14 @@ func isDnsmasqManaged() bool {
 	return isNetworkManagerWithDnsmasq()
 }
 
+func ensureDnsmasqBaseConfig() error {
+	// On Linux, dnsmasq base config is typically managed by the system
+	// (NetworkManager or systemd-resolved). We don't need to modify
+	// the main config file like we do on macOS with Homebrew.
+	// This stub satisfies the cross-platform interface.
+	return nil
+}
+
 func isNetworkManagerWithDnsmasq() bool {
 	_, err := os.Stat("/etc/NetworkManager/NetworkManager.conf")
 	if err != nil {
