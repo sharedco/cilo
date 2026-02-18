@@ -65,6 +65,7 @@ type EnvironmentUpRequest struct {
 	WorkspacePath string   `json:"workspace_path,omitempty"` // Optional: override workspace
 	Build         bool     `json:"build,omitempty"`          // Rebuild containers
 	Recreate      bool     `json:"recreate,omitempty"`       // Force recreate
+	Project       string   `json:"project,omitempty"`
 	Shared        []string `json:"shared,omitempty"`
 	Isolate       []string `json:"isolate,omitempty"`
 }
@@ -210,6 +211,7 @@ type UpOptions struct {
 	WorkspacePath string
 	Build         bool
 	Recreate      bool
+	Project       string
 	Shared        []string
 	Isolate       []string
 }

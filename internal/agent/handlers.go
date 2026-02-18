@@ -77,6 +77,7 @@ func (s *Server) HandleEnvironmentUp(w http.ResponseWriter, r *http.Request) {
 		WorkspacePath: req.WorkspacePath,
 		Build:         req.Build,
 		Recreate:      req.Recreate,
+		Project:       req.Project,
 		Shared:        req.Shared,
 		Isolate:       req.Isolate,
 	}

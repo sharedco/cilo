@@ -658,6 +658,7 @@ func upRemote(cmd *cobra.Command, args []string, target Target) error {
 		Build:         build,
 		Recreate:      recreate,
 		WorkspacePath: remoteWorkspace,
+		Project:       project,
 		Shared:        sharedFlag,
 		Isolate:       isolateFlag,
 	}

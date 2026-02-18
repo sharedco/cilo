@@ -159,6 +159,7 @@ func (c *Client) UpEnvironment(name string, opts UpOptions) error {
 		WorkspacePath: opts.WorkspacePath,
 		Build:         opts.Build,
 		Recreate:      opts.Recreate,
+		Project:       opts.Project,
 		Shared:        opts.Shared,
 		Isolate:       opts.Isolate,
 	}
@@ -172,6 +173,7 @@ func (c *Client) UpEnvironmentWithResponse(name string, opts UpOptions) (*Enviro
 		WorkspacePath: opts.WorkspacePath,
 		Build:         opts.Build,
 		Recreate:      opts.Recreate,
+		Project:       opts.Project,
 		Shared:        opts.Shared,
 		Isolate:       opts.Isolate,
 	}

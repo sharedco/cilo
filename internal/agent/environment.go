@@ -138,9 +138,13 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 	}
 
 	log.Printf("Starting environment %s in workspace %s", req.EnvName, workspacePath)
-	projectNameForShared, err := m.getProjectName(workspacePath)
-	if err != nil {
-		return nil, err
+	var err error
+	projectNameForShared := strings.TrimSpace(req.Project)
+	if projectNameForShared == "" {
+		projectNameForShared, err = m.getProjectName(workspacePath)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	composeFiles, err := m.resolveComposeFiles(workspacePath)

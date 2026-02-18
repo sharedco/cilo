@@ -11,6 +11,7 @@ type UpRequest struct {
 	Subnet        string   `json:"subnet"`
 	Build         bool     `json:"build,omitempty"`
 	Recreate      bool     `json:"recreate,omitempty"`
+	Project       string   `json:"project,omitempty"`
 	Shared        []string `json:"shared,omitempty"`
 	Isolate       []string `json:"isolate,omitempty"`
 }
