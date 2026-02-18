@@ -211,6 +211,9 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 	projectName := fmt.Sprintf("cilo_%s", req.EnvName)
 	args := append([]string{"-p", projectName}, composeArgFiles...)
 	args = append(args, "up", "-d")
+	for _, sharedService := range sharedServices {
+		args = append(args, "--scale", fmt.Sprintf("%s=0", sharedService))
+	}
 
 	if req.Build {
 		args = append(args, "--build")
