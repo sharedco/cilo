@@ -258,7 +258,10 @@ func StartTunnelDaemon(cfg *tunnel.DaemonConfig) error {
 	}
 
 	if os.Geteuid() != 0 && !canRunSudoNonInteractive() {
-		return fmt.Errorf("tunnel daemon requires sudo: run 'sudo cilo tunnel daemon'")
+		fmt.Println("  Tunnel daemon requires sudo (TUN interface creation)...")
+		if err := exec.Command("sudo", "-v").Run(); err != nil {
+			return fmt.Errorf("tunnel daemon requires sudo: run 'sudo cilo tunnel daemon'")
+		}
 	}
 
 	logDir, _ := tunnel.DaemonDir()
