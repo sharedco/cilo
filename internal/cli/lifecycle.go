@@ -607,6 +607,8 @@ func upRemote(cmd *cobra.Command, args []string, target Target) error {
 
 	build, _ := cmd.Flags().GetBool("build")
 	recreate, _ := cmd.Flags().GetBool("recreate")
+	sharedFlag, _ := cmd.Flags().GetStringSlice("shared")
+	isolateFlag, _ := cmd.Flags().GetStringSlice("isolate")
 
 	client := target.GetClient()
 	if client == nil {
@@ -656,6 +658,9 @@ func upRemote(cmd *cobra.Command, args []string, target Target) error {
 		Build:         build,
 		Recreate:      recreate,
 		WorkspacePath: remoteWorkspace,
+		Project:       project,
+		Shared:        sharedFlag,
+		Isolate:       isolateFlag,
 	}
 
 	fmt.Printf("Starting environment %s/%s on %s...\n", project, name, target.GetMachine())

@@ -20,6 +20,8 @@ import (
 
 	"github.com/sharedco/cilo/internal/compose"
 	"github.com/sharedco/cilo/internal/models"
+	"github.com/sharedco/cilo/internal/share"
+	sharestore "github.com/sharedco/cilo/internal/share/store"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,13 +29,19 @@ import (
 type EnvironmentManager struct {
 	workspaceRoot string    // e.g., /var/cilo/workspaces
 	proxy         *EnvProxy // reverse proxy for routing HTTP traffic
+	sharedStore   sharestore.SharedServiceStore
 }
 
 // NewEnvironmentManager creates a new environment manager
-func NewEnvironmentManager(workspaceRoot string, proxy *EnvProxy) *EnvironmentManager {
+func NewEnvironmentManager(workspaceRoot string, proxy *EnvProxy, sharedStore sharestore.SharedServiceStore) *EnvironmentManager {
+	if sharedStore == nil {
+		sharedStore = sharestore.NewLocalStateStore()
+	}
+
 	return &EnvironmentManager{
 		workspaceRoot: workspaceRoot,
 		proxy:         proxy,
+		sharedStore:   sharedStore,
 	}
 }
 
@@ -130,6 +138,31 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 	}
 
 	log.Printf("Starting environment %s in workspace %s", req.EnvName, workspacePath)
+	var err error
+	projectNameForShared := strings.TrimSpace(req.Project)
+	if projectNameForShared == "" {
+		projectNameForShared, err = m.getProjectName(workspacePath)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	composeFiles, err := m.resolveComposeFiles(workspacePath)
+	if err != nil {
+		return nil, err
+	}
+
+	sharedServices, err := compose.GetServicesWithLabel(composeFiles, "cilo.share", "true")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get shared services: %w", err)
+	}
+	for _, svc := range req.Shared {
+		svc = strings.TrimSpace(svc)
+		if svc != "" && !containsService(sharedServices, svc) {
+			sharedServices = append(sharedServices, svc)
+		}
+	}
+	sharedServices = filterServices(sharedServices, req.Isolate)
 
 	// Create Docker network if subnet is provided
 	if req.Subnet != "" {
@@ -139,25 +172,48 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 		}
 
 		// Generate docker-compose override to attach containers to Cilo network
-		if err := m.generateOverride(workspacePath, req.EnvName, req.Subnet); err != nil {
+		if err := m.generateOverride(workspacePath, req.EnvName, req.Subnet, composeFiles, sharedServices); err != nil {
 			log.Printf("Warning: failed to generate override.yml: %v", err)
 		}
 	}
 
+	if err := m.writeSelectedSharedServices(workspacePath, sharedServices); err != nil {
+		return nil, err
+	}
+
+	sharedIPs := make(map[string]string)
+	var shareMgr *share.Manager
+	if len(sharedServices) > 0 {
+		shareMgr = share.NewManagerWithStore(m, m.sharedStore, ctx)
+		for _, svc := range sharedServices {
+			containerName, ip, err := shareMgr.EnsureSharedService(svc, projectNameForShared, composeFiles)
+			if err != nil {
+				return nil, fmt.Errorf("failed to ensure shared service %s: %w", svc, err)
+			}
+
+			if err := shareMgr.RegisterSharedService(svc, projectNameForShared, containerName, ip, composeFiles); err != nil {
+				return nil, fmt.Errorf("failed to register shared service %s: %w", svc, err)
+			}
+		}
+	}
+
 	// Build docker compose command
-	composeFiles := []string{
+	composeArgFiles := []string{
 		"-f", "docker-compose.yml",
 	}
 
 	// Check if override file exists
 	overridePath := filepath.Join(workspacePath, ".cilo", "override.yml")
 	if _, err := os.Stat(overridePath); err == nil {
-		composeFiles = append(composeFiles, "-f", ".cilo/override.yml")
+		composeArgFiles = append(composeArgFiles, "-f", ".cilo/override.yml")
 	}
 
 	projectName := fmt.Sprintf("cilo_%s", req.EnvName)
-	args := append([]string{"-p", projectName}, composeFiles...)
+	args := append([]string{"-p", projectName}, composeArgFiles...)
 	args = append(args, "up", "-d")
+	for _, sharedService := range sharedServices {
+		args = append(args, "--scale", fmt.Sprintf("%s=0", sharedService))
+	}
 
 	if req.Build {
 		args = append(args, "--build")
@@ -182,10 +238,32 @@ func (m *EnvironmentManager) Up(ctx context.Context, req UpRequest) (*UpResponse
 
 	log.Printf("Docker compose up completed for %s", req.EnvName)
 
+	if shareMgr != nil {
+		for _, svc := range sharedServices {
+			if err := shareMgr.ConnectSharedServiceToEnvironment(svc, projectNameForShared, req.EnvName); err != nil {
+				return nil, fmt.Errorf("failed to connect shared service %s: %w", svc, err)
+			}
+
+			netIP, err := shareMgr.GetSharedServiceIP(svc, projectNameForShared, req.EnvName)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get shared service IP %s: %w", svc, err)
+			}
+
+			if err := shareMgr.AddEnvironmentReference(svc, projectNameForShared, projectNameForShared, req.EnvName); err != nil {
+				return nil, fmt.Errorf("failed to add shared service reference %s: %w", svc, err)
+			}
+
+			sharedIPs[svc] = netIP
+		}
+	}
+
 	// Get service IPs
 	services, err := m.getServiceIPs(ctx, workspacePath, req.EnvName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service IPs: %w", err)
+	}
+	for svc, ip := range sharedIPs {
+		services[svc] = ip
 	}
 
 	// Register proxy routes for each service
@@ -217,6 +295,33 @@ func (m *EnvironmentManager) Down(ctx context.Context, envName string) error {
 		return fmt.Errorf("workspace does not exist: %s", workspacePath)
 	}
 
+	projectNameForShared, err := m.getProjectName(workspacePath)
+	if err != nil {
+		return err
+	}
+
+	selectedSharedServices, err := m.readSelectedSharedServices(workspacePath)
+	if err != nil {
+		return err
+	}
+
+	if len(selectedSharedServices) > 0 {
+		shareMgr := share.NewManagerWithStore(m, m.sharedStore, ctx)
+		for _, svc := range selectedSharedServices {
+			if err := shareMgr.DisconnectSharedServiceFromEnvironment(svc, projectNameForShared, envName); err != nil {
+				log.Printf("Warning: failed to disconnect shared service %s: %v", svc, err)
+			}
+
+			if err := shareMgr.RemoveEnvironmentReference(svc, projectNameForShared, projectNameForShared, envName); err != nil {
+				log.Printf("Warning: failed to remove shared service reference %s: %v", svc, err)
+			}
+
+			if err := shareMgr.StopSharedServiceIfUnused(svc, projectNameForShared); err != nil {
+				log.Printf("Warning: failed to stop shared service %s: %v", svc, err)
+			}
+		}
+	}
+
 	log.Printf("Stopping environment %s", envName)
 
 	projectName := fmt.Sprintf("cilo_%s", envName)
@@ -232,6 +337,10 @@ func (m *EnvironmentManager) Down(ctx context.Context, envName string) error {
 
 	if m.proxy != nil {
 		m.proxy.RemoveRoutesForEnv(envName)
+	}
+
+	if err := m.clearSelectedSharedServices(workspacePath); err != nil {
+		log.Printf("Warning: failed to clear shared service selections: %v", err)
 	}
 
 	log.Printf("Environment %s stopped successfully", envName)
@@ -424,25 +533,248 @@ func (m *EnvironmentManager) networkSubnetMatches(ctx context.Context, name, exp
 	return strings.TrimSpace(stdout.String()) == expectedSubnet
 }
 
-func (m *EnvironmentManager) generateOverride(workspacePath, envName, subnet string) error {
+func (m *EnvironmentManager) generateOverride(workspacePath, envName, subnet string, composeFiles []string, sharedServices []string) error {
 	ciloDir := filepath.Join(workspacePath, ".cilo")
 	if err := os.MkdirAll(ciloDir, 0755); err != nil {
 		return fmt.Errorf("failed to create .cilo directory: %w", err)
 	}
 
 	overridePath := filepath.Join(ciloDir, "override.yml")
-	baseFiles := []string{filepath.Join(workspacePath, "docker-compose.yml")}
 
 	env := &models.Environment{
 		Name:   envName,
 		Subnet: subnet,
 	}
 
-	if err := compose.Transform(env, baseFiles, overridePath, ".test"); err != nil {
+	if err := compose.TransformWithShared(env, composeFiles, overridePath, ".test", sharedServices); err != nil {
 		return fmt.Errorf("failed to transform compose: %w", err)
 	}
 
 	log.Printf("Generated override.yml for %s with network cilo_%s", envName, envName)
+	return nil
+}
+
+func (m *EnvironmentManager) resolveComposeFiles(workspacePath string) ([]string, error) {
+	projectConfig, err := models.LoadProjectConfigFromPath(workspacePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load project config: %w", err)
+	}
+
+	composeFiles, _, err := compose.ResolveComposeFiles(workspacePath, nil)
+	if err == nil && projectConfig != nil {
+		composeFiles, _, err = compose.ResolveComposeFiles(workspacePath, projectConfig.ComposeFiles)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return composeFiles, nil
+}
+
+func (m *EnvironmentManager) getProjectName(workspacePath string) (string, error) {
+	projectConfig, err := models.LoadProjectConfigFromPath(workspacePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to load project config: %w", err)
+	}
+	if projectConfig != nil && projectConfig.Project != "" {
+		return projectConfig.Project, nil
+	}
+
+	return filepath.Base(workspacePath), nil
+}
+
+func (m *EnvironmentManager) selectedSharedServicesPath(workspacePath string) string {
+	return filepath.Join(workspacePath, ".cilo", "selected-shared-services.json")
+}
+
+func (m *EnvironmentManager) writeSelectedSharedServices(workspacePath string, sharedServices []string) error {
+	if err := os.MkdirAll(filepath.Join(workspacePath, ".cilo"), 0755); err != nil {
+		return fmt.Errorf("failed to create .cilo directory: %w", err)
+	}
+
+	path := m.selectedSharedServicesPath(workspacePath)
+	data, err := json.MarshalIndent(map[string][]string{"services": sharedServices}, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal shared services selection: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("failed to write shared services selection: %w", err)
+	}
+
+	return nil
+}
+
+func (m *EnvironmentManager) readSelectedSharedServices(workspacePath string) ([]string, error) {
+	path := m.selectedSharedServicesPath(workspacePath)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			composeFiles, resolveErr := m.resolveComposeFiles(workspacePath)
+			if resolveErr != nil {
+				return []string{}, nil
+			}
+
+			services, listErr := compose.GetServicesWithLabel(composeFiles, "cilo.share", "true")
+			if listErr != nil {
+				return []string{}, nil
+			}
+			return services, nil
+		}
+		return nil, fmt.Errorf("failed to read shared services selection: %w", err)
+	}
+
+	var payload struct {
+		Services []string `json:"services"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return nil, fmt.Errorf("failed to parse shared services selection: %w", err)
+	}
+
+	return payload.Services, nil
+}
+
+func (m *EnvironmentManager) clearSelectedSharedServices(workspacePath string) error {
+	path := m.selectedSharedServicesPath(workspacePath)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func containsService(services []string, name string) bool {
+	for _, svc := range services {
+		if svc == name {
+			return true
+		}
+	}
+	return false
+}
+
+func filterServices(services []string, filtered []string) []string {
+	if len(filtered) == 0 {
+		return services
+	}
+
+	blocked := make(map[string]struct{}, len(filtered))
+	for _, svc := range filtered {
+		svc = strings.TrimSpace(svc)
+		if svc != "" {
+			blocked[svc] = struct{}{}
+		}
+	}
+
+	result := make([]string, 0, len(services))
+	for _, svc := range services {
+		if _, found := blocked[svc]; !found {
+			result = append(result, svc)
+		}
+	}
+
+	return result
+}
+
+func (m *EnvironmentManager) ConnectContainerToNetwork(ctx context.Context, containerName, networkName, alias string) error {
+	args := []string{"network", "connect"}
+	if alias != "" {
+		args = append(args, "--alias", alias)
+	}
+	args = append(args, networkName, containerName)
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if strings.Contains(stderr.String(), "already exists") || strings.Contains(stderr.String(), "already connected") {
+			return nil
+		}
+		return fmt.Errorf("failed to connect container %s to network %s: %w", containerName, networkName, err)
+	}
+
+	return nil
+}
+
+func (m *EnvironmentManager) DisconnectContainerFromNetwork(ctx context.Context, containerName, networkName string) error {
+	cmd := exec.CommandContext(ctx, "docker", "network", "disconnect", networkName, containerName)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if strings.Contains(stderr.String(), "is not connected") || strings.Contains(stderr.String(), "No such container") {
+			return nil
+		}
+		return fmt.Errorf("failed to disconnect container %s from network %s: %w", containerName, networkName, err)
+	}
+
+	return nil
+}
+
+func (m *EnvironmentManager) GetContainerIPForNetwork(ctx context.Context, containerName, networkName string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "inspect", "--format", fmt.Sprintf("{{(index .NetworkSettings.Networks %q).IPAddress}}", networkName), containerName)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("failed to get container IP for network %s: %w", networkName, err)
+	}
+
+	ip := strings.TrimSpace(stdout.String())
+	if ip == "" {
+		return "", fmt.Errorf("container %s has no IP on network %s", containerName, networkName)
+	}
+
+	return ip, nil
+}
+
+func (m *EnvironmentManager) ContainerExists(ctx context.Context, containerName string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "docker", "inspect", containerName)
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (m *EnvironmentManager) GetContainerStatus(ctx context.Context, containerName string) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "inspect", "-f", "{{.State.Status}}", containerName)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("failed to get container status for %s: %w", containerName, err)
+	}
+
+	status := strings.TrimSpace(stdout.String())
+	if status == "" {
+		return "", fmt.Errorf("empty container status for %s", containerName)
+	}
+
+	return status, nil
+}
+
+func (m *EnvironmentManager) StopContainer(ctx context.Context, containerName string) error {
+	cmd := exec.CommandContext(ctx, "docker", "stop", containerName)
+	if err := cmd.Run(); err != nil {
+		if strings.Contains(err.Error(), "No such container") {
+			return nil
+		}
+		return fmt.Errorf("failed to stop container %s: %w", containerName, err)
+	}
+
+	return nil
+}
+
+func (m *EnvironmentManager) RemoveContainer(ctx context.Context, containerName string) error {
+	cmd := exec.CommandContext(ctx, "docker", "rm", containerName)
+	if err := cmd.Run(); err != nil {
+		if strings.Contains(err.Error(), "No such container") {
+			return nil
+		}
+		return fmt.Errorf("failed to remove container %s: %w", containerName, err)
+	}
+
 	return nil
 }
 

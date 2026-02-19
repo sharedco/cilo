@@ -6,11 +6,14 @@ package agent
 
 // UpRequest is the request body for POST /environment/up
 type UpRequest struct {
-	WorkspacePath string `json:"workspace_path"`
-	EnvName       string `json:"env_name"`
-	Subnet        string `json:"subnet"`
-	Build         bool   `json:"build,omitempty"`
-	Recreate      bool   `json:"recreate,omitempty"`
+	WorkspacePath string   `json:"workspace_path"`
+	EnvName       string   `json:"env_name"`
+	Subnet        string   `json:"subnet"`
+	Build         bool     `json:"build,omitempty"`
+	Recreate      bool     `json:"recreate,omitempty"`
+	Project       string   `json:"project,omitempty"`
+	Shared        []string `json:"shared,omitempty"`
+	Isolate       []string `json:"isolate,omitempty"`
 }
 
 // UpResponse is the response for POST /environment/up

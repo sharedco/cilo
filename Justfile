@@ -24,16 +24,12 @@ bump-version:
 build:
   go build -ldflags "-X github.com/sharedco/cilo/internal/version.Version={{VERSION}} -X github.com/sharedco/cilo/internal/version.Commit={{COMMIT}} -X github.com/sharedco/cilo/internal/version.BuildTime={{BUILDTIME}}" -o cilo ./cmd/cilo
 
-# Build cilo-server binary (with version info)
-build-server:
-  go build -ldflags "-X github.com/sharedco/cilo/internal/version.Version={{VERSION}} -X github.com/sharedco/cilo/internal/version.Commit={{COMMIT}} -X github.com/sharedco/cilo/internal/version.BuildTime={{BUILDTIME}}" -o cilo-server ./cmd/cilo-server
-
 # Build cilo-agent binary (with version info)
 build-agent:
   go build -ldflags "-X github.com/sharedco/cilo/internal/version.Version={{VERSION}} -X github.com/sharedco/cilo/internal/version.Commit={{COMMIT}} -X github.com/sharedco/cilo/internal/version.BuildTime={{BUILDTIME}}" -o cilo-agent ./cmd/cilo-agent
 
 # Build all binaries (with version info)
-build-all: build build-server build-agent
+build-all: build build-agent
 
 # Build agent for Linux (cross-compile)
 build-agent-linux:
@@ -84,6 +80,11 @@ run-agent:
 
 # Reinstall and restart the agent (build + install + start)
 restart-agent: install-agent run-agent
+
+# Stop the agent locally (requires sudo)
+stop-agent:
+  sudo pkill -x cilo-agent 2>/dev/null || true
+  @echo "✓ Stopped cilo-agent (if running)"
 
 # Deploy agent to a remote Linux machine (cross-compile, scp, restart)
 # Usage: just deploy-agent user@host
@@ -145,7 +146,7 @@ check: fmt lint test
 
 # Clean build artifacts
 clean:
-  rm -f cilo cilo-server cilo-agent
+  rm -f cilo cilo-agent
   go clean -cache
 
 # Run cilo doctor
@@ -155,59 +156,6 @@ doctor:
 # Initialize cilo (requires sudo)
 init:
   sudo ./cilo init
-
-# Start self-hosted server and agent (requires sudo for agent install)
-server-up:
-  @echo "Starting Cilo Server + Agent..."
-  @echo "This requires sudo to install cilo-agent to /usr/local/bin"
-  @sudo ./scripts/start-server.sh
-
-# Stop self-hosted server
-server-down:
-  cd deploy/self-host && docker compose down
-
-# Clean up server completely (containers, volumes, envs, agent, wireguard)
-server-clean:
-  @echo "Cleaning up Cilo Server..."
-  @echo "Stopping containers..."
-  cd deploy/self-host && docker compose down -v 2>/dev/null || true
-  @echo "Removing environment containers..."
-  docker ps -aq --filter "name=cilo_" | xargs -r docker stop 2>/dev/null || true
-  docker ps -aq --filter "name=cilo_" | xargs -r docker rm 2>/dev/null || true
-  @echo "Removing environment networks..."
-  docker network ls --format "{{{{.Name}}}}" | grep -E "^cilo_" | xargs -r docker network rm 2>/dev/null || true
-  docker network ls --format "{{{{.Name}}}}" | grep -E "^[a-f0-9-]{36}_default$$" | xargs -r docker network rm 2>/dev/null || true
-  @echo "Stopping cilo-agent..."
-  sudo pkill -x cilo-agent 2>/dev/null || true
-  @echo "Cleaning up WireGuard..."
-  sudo ip link del wg0 2>/dev/null || true
-  @echo "Cleaning up workspace..."
-  sudo rm -rf /var/cilo/envs/* 2>/dev/null || true
-  @echo "Cleaning up .env..."
-  rm -f deploy/self-host/.env 2>/dev/null || true
-  @echo "✓ Server cleaned up"
-
-# View server logs
-server-logs:
-  cd deploy/self-host && docker compose logs -f server
-
-# Check server health
-server-status:
-  @curl -s http://localhost:8080/health || echo "Server not running"
-  @echo "Server URL: http://localhost:8080"
-
-# List registered machines
-machines:
-  cd deploy/self-host && docker compose exec server cilo-server machines list
-
-# Remove a machine from the pool
-remove-machine name:
-  cd deploy/self-host && docker compose exec server cilo-server machines remove {{name}}
-
-# Register an external machine via Tailscale
-add-machine-ts name tailscale-ip user:
-  cd deploy/self-host && docker compose exec server cilo-server machines add --name {{name}} --host {{tailscale-ip}} --ssh-user {{user}} --size manual
-  @echo "✓ Machine {{name}} added. Run 'just machines' to verify."
 
 # Clean up all tunnel state (kills processes, removes state files)
 tunnel-clean:

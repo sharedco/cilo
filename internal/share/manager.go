@@ -16,21 +16,42 @@ import (
 	"time"
 
 	"github.com/sharedco/cilo/internal/models"
-	"github.com/sharedco/cilo/internal/runtime"
-	"github.com/sharedco/cilo/internal/state"
+	sharestore "github.com/sharedco/cilo/internal/share/store"
 	"gopkg.in/yaml.v3"
 )
 
-// Manager handles shared service lifecycle
+type Provider interface {
+	ConnectContainerToNetwork(ctx context.Context, containerName, networkName, alias string) error
+	DisconnectContainerFromNetwork(ctx context.Context, containerName, networkName string) error
+	GetContainerIPForNetwork(ctx context.Context, containerName, networkName string) (string, error)
+	ContainerExists(ctx context.Context, containerName string) (bool, error)
+	GetContainerStatus(ctx context.Context, containerName string) (string, error)
+	StopContainer(ctx context.Context, containerName string) error
+	RemoveContainer(ctx context.Context, containerName string) error
+}
+
 type Manager struct {
-	provider runtime.Provider
+	provider Provider
+	store    sharestore.SharedServiceStore
 	ctx      context.Context
 }
 
-// NewManager creates a new shared service manager
-func NewManager(provider runtime.Provider, ctx context.Context) *Manager {
+func NewManager(provider Provider, ctx context.Context) *Manager {
 	return &Manager{
 		provider: provider,
+		store:    sharestore.NewLocalStateStore(),
+		ctx:      ctx,
+	}
+}
+
+func NewManagerWithStore(provider Provider, sharedStore sharestore.SharedServiceStore, ctx context.Context) *Manager {
+	if sharedStore == nil {
+		sharedStore = sharestore.NewLocalStateStore()
+	}
+
+	return &Manager{
+		provider: provider,
+		store:    sharedStore,
 		ctx:      ctx,
 	}
 }
@@ -245,27 +266,32 @@ func extractNamedVolumes(volumeMounts []string) []string {
 // ConnectSharedServiceToEnvironment attaches shared container to env network with alias
 func (m *Manager) ConnectSharedServiceToEnvironment(serviceName, project, envName string) error {
 	containerName := fmt.Sprintf("cilo_shared_%s_%s", project, serviceName)
-	networkName := fmt.Sprintf("cilo_%s", envName)
-
-	// Connect with alias so containers in the environment can resolve by service name
-	if err := m.provider.ConnectContainerToNetwork(m.ctx, containerName, networkName, serviceName); err != nil {
-		return fmt.Errorf("failed to connect to network: %w", err)
+	for _, networkName := range environmentNetworkCandidates(envName) {
+		if err := m.provider.ConnectContainerToNetwork(m.ctx, containerName, networkName, serviceName); err == nil {
+			return nil
+		}
 	}
 
-	return nil
+	return fmt.Errorf("failed to connect container %s to any environment network", containerName)
 }
 
 // DisconnectSharedServiceFromEnvironment removes network attachment
 func (m *Manager) DisconnectSharedServiceFromEnvironment(serviceName, project, envName string) error {
 	containerName := fmt.Sprintf("cilo_shared_%s_%s", project, serviceName)
-	networkName := fmt.Sprintf("cilo_%s", envName)
-
-	if err := m.provider.DisconnectContainerFromNetwork(m.ctx, containerName, networkName); err != nil {
-		// Don't fail if already disconnected
-		if strings.Contains(err.Error(), "is not connected to") {
-			return nil
+	var lastErr error
+	for _, networkName := range environmentNetworkCandidates(envName) {
+		if err := m.provider.DisconnectContainerFromNetwork(m.ctx, containerName, networkName); err != nil {
+			if strings.Contains(err.Error(), "is not connected to") || strings.Contains(err.Error(), "No such network") {
+				continue
+			}
+			lastErr = err
+			continue
 		}
-		return fmt.Errorf("failed to disconnect from network: %w", err)
+		return nil
+	}
+
+	if lastErr != nil {
+		return fmt.Errorf("failed to disconnect from environment networks: %w", lastErr)
 	}
 
 	return nil
@@ -274,37 +300,29 @@ func (m *Manager) DisconnectSharedServiceFromEnvironment(serviceName, project, e
 // GetSharedServiceIP returns IP of shared container for a specific environment network
 func (m *Manager) GetSharedServiceIP(serviceName, project, envName string) (string, error) {
 	containerName := fmt.Sprintf("cilo_shared_%s_%s", project, serviceName)
-	networkName := fmt.Sprintf("cilo_%s", envName)
-
-	ip, err := m.provider.GetContainerIPForNetwork(m.ctx, containerName, networkName)
-	if err != nil {
-		return "", fmt.Errorf("failed to get IP: %w", err)
+	for _, networkName := range environmentNetworkCandidates(envName) {
+		ip, err := m.provider.GetContainerIPForNetwork(m.ctx, containerName, networkName)
+		if err == nil {
+			return ip, nil
+		}
 	}
 
-	return ip, nil
+	return "", fmt.Errorf("failed to get shared service IP on environment networks")
 }
 
 // RegisterSharedService adds or updates a shared service in state
 func (m *Manager) RegisterSharedService(serviceName, project, containerName, ip string, composeFiles []string) error {
-	// Load service config to compute hash
 	serviceConfig, err := m.loadServiceConfig(serviceName, composeFiles)
 	if err != nil {
 		return fmt.Errorf("failed to load service config: %w", err)
 	}
 
 	configHash := computeConfigHash(serviceConfig)
+	key := sharestore.Key(project, serviceName)
 
-	return state.WithLock(func(st *models.State) error {
-		// Initialize SharedServices map if nil
-		if st.SharedServices == nil {
-			st.SharedServices = make(map[string]*models.SharedService)
-		}
-
-		key := fmt.Sprintf("%s/%s", project, serviceName)
-
-		sharedService := st.SharedServices[key]
-		if sharedService == nil {
-			sharedService = &models.SharedService{
+	return m.store.Update(m.ctx, key, func(existing *models.SharedService, exists bool) (*models.SharedService, bool, error) {
+		if !exists || existing == nil {
+			return &models.SharedService{
 				Name:       serviceName,
 				Container:  containerName,
 				IP:         ip,
@@ -313,89 +331,78 @@ func (m *Manager) RegisterSharedService(serviceName, project, containerName, ip 
 				ConfigHash: configHash,
 				CreatedAt:  time.Now(),
 				UsedBy:     []string{},
-			}
-			st.SharedServices[key] = sharedService
-		} else {
-			// Update IP in case it changed
-			sharedService.IP = ip
-			sharedService.DisconnectTimeout = time.Time{} // Clear any grace period
+			}, true, nil
 		}
 
-		return nil
+		existing.Container = containerName
+		existing.IP = ip
+		existing.Project = project
+		existing.Image = serviceConfig.Image
+		existing.ConfigHash = configHash
+		existing.DisconnectTimeout = time.Time{}
+
+		return existing, true, nil
 	})
 }
 
-// AddEnvironmentReference adds an environment to a shared service's UsedBy list
 func (m *Manager) AddEnvironmentReference(serviceName, project, envProject, envName string) error {
-	return state.WithLock(func(st *models.State) error {
-		key := fmt.Sprintf("%s/%s", project, serviceName)
-		envKey := fmt.Sprintf("%s/%s", envProject, envName)
+	key := sharestore.Key(project, serviceName)
+	envKey := fmt.Sprintf("%s/%s", envProject, envName)
 
-		sharedService := st.SharedServices[key]
-		if sharedService == nil {
-			return fmt.Errorf("shared service %s not found", key)
+	return m.store.Update(m.ctx, key, func(existing *models.SharedService, exists bool) (*models.SharedService, bool, error) {
+		if !exists || existing == nil {
+			return nil, false, fmt.Errorf("shared service %s not found", key)
 		}
 
-		// Add if not already present
-		for _, used := range sharedService.UsedBy {
+		for _, used := range existing.UsedBy {
 			if used == envKey {
-				return nil // Already present
+				existing.DisconnectTimeout = time.Time{}
+				return existing, true, nil
 			}
 		}
 
-		sharedService.UsedBy = append(sharedService.UsedBy, envKey)
-		sharedService.DisconnectTimeout = time.Time{} // Clear grace period if reconnecting
-
-		return nil
+		existing.UsedBy = append(existing.UsedBy, envKey)
+		existing.DisconnectTimeout = time.Time{}
+		return existing, true, nil
 	})
 }
 
-// RemoveEnvironmentReference removes an environment from a shared service's UsedBy list
 func (m *Manager) RemoveEnvironmentReference(serviceName, project, envProject, envName string) error {
-	return state.WithLock(func(st *models.State) error {
-		key := fmt.Sprintf("%s/%s", project, serviceName)
-		envKey := fmt.Sprintf("%s/%s", envProject, envName)
+	key := sharestore.Key(project, serviceName)
+	envKey := fmt.Sprintf("%s/%s", envProject, envName)
 
-		sharedService := st.SharedServices[key]
-		if sharedService == nil {
-			return nil // Already removed
+	return m.store.Update(m.ctx, key, func(existing *models.SharedService, exists bool) (*models.SharedService, bool, error) {
+		if !exists || existing == nil {
+			return nil, false, nil
 		}
 
-		// Remove from UsedBy
-		newUsedBy := []string{}
-		for _, used := range sharedService.UsedBy {
+		newUsedBy := make([]string, 0, len(existing.UsedBy))
+		for _, used := range existing.UsedBy {
 			if used != envKey {
 				newUsedBy = append(newUsedBy, used)
 			}
 		}
-		sharedService.UsedBy = newUsedBy
+		existing.UsedBy = newUsedBy
 
-		// If no longer used, set grace period
-		if len(sharedService.UsedBy) == 0 {
-			sharedService.DisconnectTimeout = time.Now().Add(60 * time.Second)
-			// Note: Grace period cleanup handled by doctor or background process
+		if len(existing.UsedBy) == 0 {
+			existing.DisconnectTimeout = time.Now().Add(60 * time.Second)
 		}
 
-		return nil
+		return existing, true, nil
 	})
 }
 
-// StopSharedServiceIfUnused stops container if reference count is zero and grace period expired
 func (m *Manager) StopSharedServiceIfUnused(serviceName, project string) error {
-	st, err := state.LoadState()
+	key := sharestore.Key(project, serviceName)
+	sharedService, exists, err := m.store.Get(m.ctx, key)
 	if err != nil {
 		return err
 	}
-
-	key := fmt.Sprintf("%s/%s", project, serviceName)
-	sharedService := st.SharedServices[key]
-	if sharedService == nil {
-		return nil // Already removed
+	if !exists || sharedService == nil {
+		return nil
 	}
 
-	// Check if unused and grace period expired
 	if len(sharedService.UsedBy) == 0 && !sharedService.DisconnectTimeout.IsZero() && time.Now().After(sharedService.DisconnectTimeout) {
-		// Stop and remove the container
 		if err := m.provider.StopContainer(m.ctx, sharedService.Container); err != nil {
 			fmt.Printf("Warning: failed to stop shared service container: %v\n", err)
 		}
@@ -403,11 +410,7 @@ func (m *Manager) StopSharedServiceIfUnused(serviceName, project string) error {
 			fmt.Printf("Warning: failed to remove shared service container: %v\n", err)
 		}
 
-		// Remove from state
-		return state.WithLock(func(st *models.State) error {
-			delete(st.SharedServices, key)
-			return nil
-		})
+		return m.store.Delete(m.ctx, key)
 	}
 
 	return nil
@@ -453,7 +456,11 @@ func (m *Manager) startContainer(containerName string) error {
 	return cmd.Run()
 }
 
-// GetSharedServiceKey creates the state key for a shared service
 func GetSharedServiceKey(project, serviceName string) string {
-	return fmt.Sprintf("%s/%s", project, serviceName)
+	return sharestore.Key(project, serviceName)
+}
+
+func environmentNetworkCandidates(envName string) []string {
+	projectName := fmt.Sprintf("cilo_%s", envName)
+	return []string{projectName, fmt.Sprintf("%s_default", projectName), fmt.Sprintf("%s_default", envName)}
 }

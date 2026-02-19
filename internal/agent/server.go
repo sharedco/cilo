@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/sharedco/cilo/internal/agent/config"
+	sharestore "github.com/sharedco/cilo/internal/share/store"
 )
 
 // Server implements the cilod API
@@ -63,10 +64,15 @@ func NewServer(cfg *config.Config) (*Server, error) {
 	verifier := NewDefaultSSHVerifier()
 	authHandler := NewAuthHandler(verifier, "/var/cilo/peers.json")
 
+	sharedStore, err := sharestore.NewJSONSharedServiceStore("/var/cilo/shared-services.json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize shared service store: %w", err)
+	}
+
 	s := &Server{
 		router:      chi.NewRouter(),
 		config:      cfg,
-		envManager:  NewEnvironmentManager(cfg.WorkspaceDir, proxy),
+		envManager:  NewEnvironmentManager(cfg.WorkspaceDir, proxy, sharedStore),
 		wgManager:   wgMgr,
 		proxy:       proxy,
 		authHandler: authHandler,
